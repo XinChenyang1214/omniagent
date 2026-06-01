@@ -1,0 +1,36 @@
+{
+  "name": "builtin.shell.safe",
+  "version": "0.1.0",
+  "description": "Run a small whitelist of read-oriented shell commands using argv only.",
+  "input_schema": {"action": "string", "argv": "array", "command": "array", "cwd": "string", "timeout": "number", "max_output_chars": "integer"},
+  "output_schema": {"argv": "array", "cwd": "string", "returncode": "integer", "stdout": "string", "stderr": "string", "stdout_preview": "string", "stderr_preview": "string", "stdout_truncated": "boolean", "stderr_truncated": "boolean", "timed_out": "boolean"},
+  "permission_requirements": ["system.exec"],
+  "dependency_requirements": [],
+  "side_effects": ["process_execution"],
+  "sandbox_level": "process",
+  "tags": ["shell", "safe_shell", "system", "builtin"],
+  "contracts": [
+    {
+      "action": "run",
+      "description": "Run a whitelisted command with argv, bounded cwd, timeout, and truncated output",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "argv", "type": "array", "required": true},
+        {"name": "cwd", "type": "string", "required": false},
+        {"name": "timeout", "type": "number", "required": false},
+        {"name": "max_output_chars", "type": "integer", "required": false}
+      ],
+      "output_fields": [
+        {"name": "argv", "type": "array"},
+        {"name": "cwd", "type": "string"},
+        {"name": "returncode", "type": "integer"},
+        {"name": "stdout_preview", "type": "string"},
+        {"name": "stderr_preview", "type": "string"},
+        {"name": "stdout_truncated", "type": "boolean"},
+        {"name": "stderr_truncated", "type": "boolean"},
+        {"name": "timed_out", "type": "boolean"}
+      ],
+      "side_effects": ["process_execution"]
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "name": "builtin.data.json",
+  "version": "0.1.0",
+  "description": "Validate, query, format, transform, and write small JSON reports with stdlib only.",
+  "input_schema": {"action": "string", "text": "string", "path": "string", "query": "string", "format_options": "object", "transform": "object", "fields": "array", "output_path": "string"},
+  "output_schema": {"valid": "boolean", "value": "any", "formatted": "string", "errors": "array", "path": "string"},
+  "permission_requirements": ["filesystem.read"],
+  "dependency_requirements": [],
+  "side_effects": [],
+  "sandbox_level": "workspace",
+  "tags": ["json", "data", "builtin"],
+  "contracts": [
+    {
+      "action": "validate",
+      "description": "Validate JSON text or a workspace JSON file",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "text", "type": "string", "required": false},
+        {"name": "path", "type": "string", "required": false}
+      ],
+      "output_fields": [
+        {"name": "valid", "type": "boolean"},
+        {"name": "errors", "type": "array"},
+        {"name": "path", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "query",
+      "description": "Read a value by dot-path, including numeric list indexes",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "text", "type": "string", "required": false},
+        {"name": "path", "type": "string", "required": false},
+        {"name": "query", "type": "string", "required": true}
+      ],
+      "output_fields": [
+        {"name": "valid", "type": "boolean"},
+        {"name": "value", "type": "any"},
+        {"name": "errors", "type": "array"},
+        {"name": "path", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "format",
+      "description": "Pretty-print or compact JSON",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "text", "type": "string", "required": false},
+        {"name": "path", "type": "string", "required": false},
+        {"name": "format_options", "type": "object", "required": false}
+      ],
+      "output_fields": [
+        {"name": "valid", "type": "boolean"},
+        {"name": "value", "type": "any"},
+        {"name": "formatted", "type": "string"},
+        {"name": "errors", "type": "array"},
+        {"name": "path", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "transform",
+      "description": "Apply simple pick, rename, set, and delete transforms",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "text", "type": "string", "required": false},
+        {"name": "path", "type": "string", "required": false},
+        {"name": "transform", "type": "object", "required": true}
+      ],
+      "output_fields": [
+        {"name": "valid", "type": "boolean"},
+        {"name": "value", "type": "any"},
+        {"name": "errors", "type": "array"},
+        {"name": "path", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "report",
+      "description": "Extract JSON fields by dot-path and write a label: value text report",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "text", "type": "string", "required": false},
+        {"name": "path", "type": "string", "required": false},
+        {"name": "fields", "type": "array", "required": true},
+        {"name": "output_path", "type": "string", "required": true},
+        {"name": "overwrite", "type": "boolean", "required": false}
+      ],
+      "output_fields": [
+        {"name": "valid", "type": "boolean"},
+        {"name": "value", "type": "object"},
+        {"name": "formatted", "type": "string"},
+        {"name": "errors", "type": "array"},
+        {"name": "path", "type": "string"}
+      ],
+      "side_effects": ["filesystem.write"]
+    }
+  ]
+}

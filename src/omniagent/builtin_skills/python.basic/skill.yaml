@@ -1,0 +1,26 @@
+{
+  "name": "builtin.python.basic",
+  "version": "0.2.0",
+  "description": "Execute Python code in the workspace sandbox.",
+  "input_schema": {"code": "string"},
+  "output_schema": {"result": "any"},
+  "permission_requirements": ["code_execution"],
+  "dependency_requirements": [],
+  "side_effects": ["python_execution"],
+  "sandbox_level": "workspace",
+  "tags": ["python", "builtin"],
+  "contracts": [
+    {
+      "action": "run",
+      "description": "Run a Python code string inside the workspace sandbox",
+      "input_fields": [
+        {"name": "code", "type": "string", "required": true, "description": "Python source code to execute"}
+      ],
+      "output_fields": [
+        {"name": "result", "type": "any", "description": "Value of the top-level `result` variable after execution"},
+        {"name": "stdout", "type": "string", "description": "Captured stdout from the run"}
+      ],
+      "side_effects": ["python_execution"]
+    }
+  ]
+}

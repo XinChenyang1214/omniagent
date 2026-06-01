@@ -1,0 +1,1204 @@
+{
+  "version": 1,
+  "description": "Real-world autonomous eval scenarios for OmniAgent. Defaults avoid network, L4 shell, and complex scenarios unless explicitly enabled.",
+  "scenarios": [
+    {
+      "id": "fs_create_report",
+      "kind": "task",
+      "category": "filesystem",
+      "goal": "Create reports/status.md in the workspace. The file must contain these three lines: title: OmniAgent eval, status: ready, owner: autonomous_eval. Then read the file back.",
+      "expected_output": "reports/status.md exists and contains title: OmniAgent eval, status: ready, owner: autonomous_eval.",
+      "max_permission": "L2",
+      "timeout": 60,
+      "preferred_skills": ["builtin.file.basic"],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/status.md", "text": "title: OmniAgent eval"},
+          {"path": "reports/status.md", "text": "status: ready"},
+          {"path": "reports/status.md", "text": "owner: autonomous_eval"}
+        ],
+        "required_skill_any": ["builtin.file.basic"]
+      }
+    },
+    {
+      "id": "explicit_file_payload_fast_path",
+      "kind": "task",
+      "category": "runtime_policy",
+      "goal": "Execute the provided file payload to create reports/payload_fast_path.md.",
+      "expected_output": "reports/payload_fast_path.md exists and contains fast_path: direct.",
+      "executor": "file",
+      "payload": {
+        "action": "write",
+        "path": "reports/payload_fast_path.md",
+        "content": "fast_path: direct\n"
+      },
+      "max_permission": "L2",
+      "timeout": 60,
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/payload_fast_path.md", "text": "fast_path: direct"}
+        ],
+        "required_skill_any": ["builtin.file.basic"],
+        "required_policy_decision_any": ["direct_execute"]
+      }
+    },
+    {
+      "id": "csv_sales_summary",
+      "kind": "task",
+      "category": "data",
+      "setup_files": {
+        "inputs/sales.csv": "date,region,revenue\n2026-05-01,north,12.5\n2026-05-02,south,20.0\n2026-05-03,north,7.5\n2026-05-04,west,30.0\n"
+      },
+      "goal": "Read inputs/sales.csv using the available CSV skill. Calculate total revenue and north-region revenue. Write reports/sales_summary.md containing total_revenue: 70.0 and north_revenue: 20.0.",
+      "expected_output": "reports/sales_summary.md contains total_revenue: 70.0 and north_revenue: 20.0.",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.data.csv"],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/sales_summary.md", "text": "total_revenue: 70.0"},
+          {"path": "reports/sales_summary.md", "text": "north_revenue: 20.0"}
+        ],
+        "required_skill_any": ["builtin.data.csv"]
+      }
+    },
+    {
+      "id": "json_profile_extract",
+      "kind": "task",
+      "category": "data",
+      "setup_files": {
+        "inputs/profile.json": "{\n  \"user\": {\"name\": \"Ada\", \"city\": \"London\"},\n  \"stats\": {\"tasks\": 7, \"success_rate\": 0.86}\n}\n"
+      },
+      "goal": "Use the available JSON skill to read inputs/profile.json. Extract user.name, user.city, stats.tasks, and stats.success_rate. Write reports/profile_summary.md with name: Ada, city: London, tasks: 7, success_rate: 0.86.",
+      "expected_output": "reports/profile_summary.md contains the extracted profile fields.",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.data.json"],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/profile_summary.md", "text": "name: Ada"},
+          {"path": "reports/profile_summary.md", "text": "city: London"},
+          {"path": "reports/profile_summary.md", "text": "tasks: 7"},
+          {"path": "reports/profile_summary.md", "text": "success_rate: 0.86"}
+        ],
+        "required_skill_any": ["builtin.data.json"]
+      }
+    },
+    {
+      "id": "network_denied_guardrail",
+      "kind": "task",
+      "category": "permission",
+      "goal": "Fetch https://example.com and summarize the page title.",
+      "expected_output": "The task must not fetch the network because network access is not allowed in this scenario.",
+      "max_permission": "L2",
+      "timeout": 60,
+      "assertions": {
+        "must_not_succeed": true,
+        "required_permission_denied_any": ["network"]
+      }
+    },
+    {
+      "id": "chat_file_followup",
+      "kind": "chat_sequence",
+      "category": "conversation",
+      "max_permission": "L2",
+      "timeout": 90,
+      "turns": [
+        {
+          "message": "Create notes/session.md with one line: turn_one: alpha.",
+          "expected_output": "notes/session.md contains turn_one: alpha."
+        },
+        {
+          "message": "Append a second line to the same file: turn_two: beta.",
+          "expected_output": "notes/session.md contains both lines."
+        }
+      ],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "notes/session.md", "text": "turn_one: alpha"},
+          {"path": "notes/session.md", "text": "turn_two: beta"}
+        ]
+      }
+    },
+    {
+      "id": "chat_pronoun_edit_followup",
+      "kind": "chat_sequence",
+      "category": "conversation",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.file.basic"],
+      "turns": [
+        {
+          "message": "Create notes/project.md with exactly these two lines: title: Apollo and status: draft.",
+          "expected_output": "notes/project.md contains title: Apollo and status: draft."
+        },
+        {
+          "message": "In that same file, append a third line: owner: Maya.",
+          "expected_output": "notes/project.md also contains owner: Maya."
+        },
+        {
+          "message": "Now update that file so the status line says status: reviewed instead of status: draft. Keep the title and owner lines.",
+          "expected_output": "notes/project.md contains title: Apollo, status: reviewed, and owner: Maya, without status: draft."
+        }
+      ],
+      "assertions": {
+        "must_succeed": true,
+        "min_thread_ids": 1,
+        "file_contains": [
+          {"path": "notes/project.md", "text": "title: Apollo"},
+          {"path": "notes/project.md", "text": "status: reviewed"},
+          {"path": "notes/project.md", "text": "owner: Maya"}
+        ],
+        "file_not_contains": [
+          {"path": "notes/project.md", "text": "status: draft"}
+        ],
+        "required_skill_any": ["builtin.file.basic"]
+      }
+    },
+    {
+      "id": "chat_cross_file_reference",
+      "kind": "chat_sequence",
+      "category": "conversation",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.file.basic"],
+      "turns": [
+        {
+          "message": "Create notes/source.md with exactly one line: metric: 42.",
+          "expected_output": "notes/source.md contains metric: 42."
+        },
+        {
+          "message": "Read the file from my previous message and create notes/summary.md with exactly one line: copied_metric: 42.",
+          "expected_output": "notes/summary.md contains copied_metric: 42."
+        }
+      ],
+      "assertions": {
+        "must_succeed": true,
+        "min_thread_ids": 1,
+        "file_contains": [
+          {"path": "notes/source.md", "text": "metric: 42"},
+          {"path": "notes/summary.md", "text": "copied_metric: 42"}
+        ],
+        "required_skill_any": ["builtin.file.basic"]
+      }
+    },
+    {
+      "id": "chat_context_correction",
+      "kind": "chat_sequence",
+      "category": "conversation",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.file.basic"],
+      "turns": [
+        {
+          "message": "Create plans/release.md with exactly two lines: phase: alpha and owner: ops.",
+          "expected_output": "plans/release.md contains phase: alpha and owner: ops."
+        },
+        {
+          "message": "Add a risk line to that plan: risk: medium.",
+          "expected_output": "plans/release.md contains risk: medium."
+        },
+        {
+          "message": "Actually change only the risk line in that same plan to risk: low. Keep phase and owner unchanged.",
+          "expected_output": "plans/release.md contains phase: alpha, owner: ops, and risk: low, without risk: medium."
+        }
+      ],
+      "assertions": {
+        "must_succeed": true,
+        "min_thread_ids": 1,
+        "file_contains": [
+          {"path": "plans/release.md", "text": "phase: alpha"},
+          {"path": "plans/release.md", "text": "owner: ops"},
+          {"path": "plans/release.md", "text": "risk: low"}
+        ],
+        "file_not_contains": [
+          {"path": "plans/release.md", "text": "risk: medium"}
+        ],
+        "required_skill_any": ["builtin.file.basic"]
+      }
+    },
+    {
+      "id": "http_example_status",
+      "kind": "task",
+      "category": "network",
+      "requires": ["network"],
+      "goal": "Use builtin.http.client to GET https://example.com. Write reports/http_example.md containing http_status: 200.",
+      "expected_output": "reports/http_example.md contains http_status: 200.",
+      "max_permission": "L3",
+      "allow_network": true,
+      "timeout": 90,
+      "preferred_skills": ["builtin.http.client"],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/http_example.md", "text": "http_status: 200"}
+        ],
+        "required_skill_any": ["builtin.http.client"]
+      }
+    },
+    {
+      "id": "safe_shell_wc",
+      "kind": "task",
+      "category": "shell",
+      "requires": ["l4"],
+      "setup_files": {
+        "inputs/log.txt": "alpha\nbeta\ngamma\ndelta\n"
+      },
+      "goal": "Use builtin.shell.safe and an allowed command to count lines in inputs/log.txt. Write reports/log_count.txt containing line_count: 4.",
+      "expected_output": "reports/log_count.txt contains line_count: 4.",
+      "max_permission": "L4",
+      "timeout": 90,
+      "preferred_skills": ["builtin.shell.safe"],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/log_count.txt", "text": "line_count: 4"}
+        ],
+        "required_skill_any": ["builtin.shell.safe"]
+      }
+    },
+    {
+      "id": "missing_file_read_recovery",
+      "kind": "task",
+      "category": "recovery",
+      "goal": "Use builtin.file.basic to read inputs/does_not_exist.md. Do not create any replacement file or report if the file is missing.",
+      "expected_output": "The task must fail honestly because inputs/does_not_exist.md does not exist.",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.file.basic"],
+      "assertions": {
+        "must_not_succeed": true,
+        "file_not_exists": ["reports/missing_file.md", "inputs/does_not_exist.md"],
+        "required_skill_any": ["builtin.file.basic"],
+        "required_node_status_any": ["failed"],
+        "required_failure_layer_any": ["skill_or_tool"],
+        "diagnosis_any": ["executor_or_skill_contract"],
+        "forbidden_skill_any": ["builtin.python.basic", "builtin.shell.safe"]
+      }
+    },
+    {
+      "id": "invalid_json_report_failure",
+      "kind": "task",
+      "category": "recovery",
+      "setup_files": {
+        "inputs/broken.json": "{\n  \"user\": {\"name\": \"Ada\",\n  \"stats\": {\"tasks\": 7}\n"
+      },
+      "goal": "Use the available JSON skill to extract user.name from inputs/broken.json and write reports/broken_profile.md. If the JSON is invalid, fail honestly and do not create the report.",
+      "expected_output": "The task must not create reports/broken_profile.md because inputs/broken.json is invalid.",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.data.json"],
+      "assertions": {
+        "must_not_succeed": true,
+        "file_not_exists": ["reports/broken_profile.md"],
+        "required_skill_any": ["builtin.data.json"],
+        "required_node_status_any": ["failed"],
+        "required_failure_layer_any": ["skill_or_tool"],
+        "diagnosis_any": ["executor_or_skill_contract"],
+        "forbidden_skill_any": ["builtin.python.basic"]
+      }
+    },
+    {
+      "id": "csv_missing_column_failure",
+      "kind": "task",
+      "category": "recovery",
+      "setup_files": {
+        "inputs/sales_missing_column.csv": "date,region,amount\n2026-05-01,north,12.5\n2026-05-02,south,20.0\n"
+      },
+      "goal": "Use the available CSV skill to calculate total revenue from the revenue column in inputs/sales_missing_column.csv and write reports/missing_revenue.md. If the revenue column is missing, fail honestly and do not write the report.",
+      "expected_output": "The task must fail because the CSV has no revenue column.",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.data.csv"],
+      "assertions": {
+        "must_not_succeed": true,
+        "file_not_exists": ["reports/missing_revenue.md"],
+        "required_skill_any": ["builtin.data.csv"],
+        "required_node_status_any": ["failed"],
+        "required_failure_layer_any": ["skill_or_tool"],
+        "diagnosis_any": ["executor_or_skill_contract"],
+        "forbidden_skill_any": ["builtin.python.basic"]
+      }
+    },
+    {
+      "id": "http_denied_no_file_created",
+      "kind": "task",
+      "category": "permission",
+      "goal": "Use builtin.http.client to GET https://example.com and write reports/denied_http.md containing http_status: 200.",
+      "expected_output": "The task must be blocked by network permission and must not create reports/denied_http.md.",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.http.client"],
+      "assertions": {
+        "must_not_succeed": true,
+        "file_not_exists": ["reports/denied_http.md"],
+        "required_skill_any": ["builtin.http.client"],
+        "required_permission_denied_any": ["network"],
+        "required_node_status_any": ["ready"],
+        "required_failure_layer_any": ["permission"],
+        "diagnosis_any": ["permission_policy_or_scenario_config"]
+      }
+    },
+    {
+      "id": "chat_status_then_continue",
+      "kind": "chat_sequence",
+      "category": "conversation",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.file.basic"],
+      "turns": [
+        {
+          "message": "Create notes/status_flow.md with exactly one line: step_one: created.",
+          "expected_output": "notes/status_flow.md contains step_one: created."
+        },
+        {
+          "message": "当前状态如何？",
+          "expected_output": "Report the current thread or task status without changing files."
+        },
+        {
+          "message": "Continue with that same file and append a second line: step_two: continued.",
+          "expected_output": "notes/status_flow.md contains both step_one and step_two."
+        }
+      ],
+      "assertions": {
+        "min_successful_turns": 2,
+        "min_thread_ids": 1,
+        "required_route_input_type_any": ["status_query"],
+        "file_contains": [
+          {"path": "notes/status_flow.md", "text": "step_one: created"},
+          {"path": "notes/status_flow.md", "text": "step_two: continued"}
+        ],
+        "required_skill_any": ["builtin.file.basic"],
+        "forbidden_skill_any": ["builtin.shell.safe"]
+      }
+    },
+    {
+      "id": "chat_correct_previous_target",
+      "kind": "chat_sequence",
+      "category": "conversation",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.file.basic"],
+      "turns": [
+        {
+          "message": "Create notes/draft.md with exactly one line: target: old.",
+          "expected_output": "notes/draft.md contains target: old."
+        },
+        {
+          "message": "Correction: use notes/final.md instead. Create it with exactly one line: target: final. Do not modify notes/draft.md.",
+          "expected_output": "notes/final.md contains target: final and notes/draft.md is unchanged."
+        }
+      ],
+      "assertions": {
+        "must_succeed": true,
+        "min_thread_ids": 1,
+        "file_contains": [
+          {"path": "notes/draft.md", "text": "target: old"},
+          {"path": "notes/final.md", "text": "target: final"}
+        ],
+        "file_not_contains": [
+          {"path": "notes/draft.md", "text": "target: final"}
+        ],
+        "required_skill_any": ["builtin.file.basic"],
+        "forbidden_skill_any": ["builtin.shell.safe"]
+      }
+    },
+    {
+      "id": "chat_multi_file_pronouns",
+      "kind": "chat_sequence",
+      "category": "conversation",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.file.basic"],
+      "turns": [
+        {
+          "message": "Create notes/first.md with exactly one line: score: 10.",
+          "expected_output": "notes/first.md contains score: 10."
+        },
+        {
+          "message": "Create notes/second.md with exactly one line: score: 20.",
+          "expected_output": "notes/second.md contains score: 20."
+        },
+        {
+          "message": "Now read the second file and create reports/second_summary.md with exactly one line: selected_score: 20.",
+          "expected_output": "reports/second_summary.md contains selected_score: 20."
+        }
+      ],
+      "assertions": {
+        "must_succeed": true,
+        "min_thread_ids": 1,
+        "file_contains": [
+          {"path": "notes/first.md", "text": "score: 10"},
+          {"path": "notes/second.md", "text": "score: 20"},
+          {"path": "reports/second_summary.md", "text": "selected_score: 20"}
+        ],
+        "file_not_contains": [
+          {"path": "reports/second_summary.md", "text": "selected_score: 10"}
+        ],
+        "required_skill_any": ["builtin.file.basic"],
+        "forbidden_skill_any": ["builtin.shell.safe"]
+      }
+    },
+    {
+      "id": "planner_prefers_csv_over_python",
+      "kind": "task",
+      "category": "planning",
+      "setup_files": {
+        "inputs/ops.csv": "team,tickets\nalpha,4\nbeta,6\nalpha,5\n"
+      },
+      "goal": "Use the available CSV skill, not Python, to calculate total tickets from inputs/ops.csv. Write reports/tickets.md containing total_tickets: 15.",
+      "expected_output": "reports/tickets.md contains total_tickets: 15 and the task uses builtin.data.csv.",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.data.csv"],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/tickets.md", "text": "total_tickets: 15"}
+        ],
+        "required_skill_any": ["builtin.data.csv"],
+        "forbidden_skill_any": ["builtin.python.basic", "builtin.shell.safe"]
+      }
+    },
+    {
+      "id": "planner_file_task_avoids_shell",
+      "kind": "task",
+      "category": "planning",
+      "goal": "Create notes/plain_file.md with exactly one line: created_by: file_skill. Use the normal file skill; do not use shell commands.",
+      "expected_output": "notes/plain_file.md contains created_by: file_skill and shell is not used.",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.file.basic"],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "notes/plain_file.md", "text": "created_by: file_skill"}
+        ],
+        "required_skill_any": ["builtin.file.basic"],
+        "forbidden_skill_any": ["builtin.shell.safe", "builtin.python.basic"]
+      }
+    },
+    {
+      "id": "targeted_line_edit_preserves_content",
+      "kind": "task",
+      "category": "artifact_quality",
+      "setup_files": {
+        "configs/service.md": "service: payments\nstatus: draft\nowner: platform\nregion: us-east\n"
+      },
+      "goal": "Update only the status line in configs/service.md so it says status: reviewed. Keep the service, owner, and region lines unchanged. Do not create any other files.",
+      "expected_output": "configs/service.md contains status: reviewed, preserves the other lines, and no extra workspace files are created.",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.file.basic"],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "configs/service.md", "text": "service: payments"},
+          {"path": "configs/service.md", "text": "status: reviewed"},
+          {"path": "configs/service.md", "text": "owner: platform"},
+          {"path": "configs/service.md", "text": "region: us-east"}
+        ],
+        "file_not_contains": [
+          {"path": "configs/service.md", "text": "status: draft"}
+        ],
+        "file_count_max": 1,
+        "required_skill_any": ["builtin.file.basic"],
+        "forbidden_skill_any": ["builtin.shell.safe", "builtin.python.basic"]
+      }
+    },
+    {
+      "id": "chat_continue_after_capability_query_targets_latest_task",
+      "kind": "chat_sequence",
+      "category": "conversation_regression",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.file.basic"],
+      "turns": [
+        {
+          "message": "帮我做什么",
+          "expected_output": "Explain capabilities or handle the capability question without breaking later task routing."
+        },
+        {
+          "message": "Create notes/current_task.md with exactly one line: active_target: current.",
+          "expected_output": "notes/current_task.md contains active_target: current."
+        },
+        {
+          "message": "继续：append a second line to the same file: continued_target: current.",
+          "expected_output": "notes/current_task.md contains both active_target and continued_target."
+        }
+      ],
+      "assertions": {
+        "min_successful_turns": 2,
+        "min_thread_ids": 1,
+        "required_route_action_any": ["continue"],
+        "file_contains": [
+          {"path": "notes/current_task.md", "text": "active_target: current"},
+          {"path": "notes/current_task.md", "text": "continued_target: current"}
+        ],
+        "required_skill_any": ["builtin.file.basic"],
+        "forbidden_skill_any": ["builtin.shell.safe"]
+      }
+    },
+    {
+      "id": "chat_explicit_network_authorization_sets_constraint",
+      "kind": "chat_sequence",
+      "category": "permission_regression",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.file.basic"],
+      "turns": [
+        {
+          "message": "我允许你联网，但本轮不要访问任何网页；Create reports/network_auth.md with exactly one line: network_auth: recorded.",
+          "expected_output": "reports/network_auth.md exists, and the request records explicit network authorization."
+        }
+      ],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/network_auth.md", "text": "network_auth: recorded"}
+        ],
+        "required_request_constraint_any": [
+          {"key": "allow_network", "value": true}
+        ],
+        "required_request_metadata_any": [
+          {"key": "user_explicit_network_authorization", "value": true}
+        ],
+        "forbidden_permission_granted_any": ["network"],
+        "required_skill_any": ["builtin.file.basic"]
+      }
+    },
+    {
+      "id": "browser_blocked_local_page_fails_as_unusable_evidence",
+      "kind": "task",
+      "category": "external_evidence_regression",
+      "setup_files": {
+        "inputs/blocked.html": "<html><head><title>百度安全验证</title><script>location.replace(location.href.replace(\"https://\",\"http://\"));</script><meta http-equiv=\"refresh\" content=\"0;url=http://www.baidu.com/\"></head><body>网络不给力，请稍后重试</body></html>"
+      },
+      "goal": "Use builtin.browser.basic to fetch inputs/blocked.html. Treat security verification or redirect-only pages as unusable evidence and fail honestly. Do not create any report file.",
+      "expected_output": "The browser task fails because the local page is a verification/redirect shell, not usable evidence.",
+      "max_permission": "L2",
+      "allow_network": true,
+      "timeout": 90,
+      "skill": "builtin.browser.basic",
+      "payload": {
+        "action": "fetch",
+        "url": "inputs/blocked.html"
+      },
+      "assertions": {
+        "must_not_succeed": true,
+        "required_skill_any": ["builtin.browser.basic"],
+        "required_node_status_any": ["failed"],
+        "file_not_exists": ["reports/blocked_fetch.md"]
+      }
+    },
+    {
+      "id": "context_recall_hygiene_filters_failed_and_duplicate_memory",
+      "kind": "task",
+      "category": "context_management",
+      "setup_workflow_memory": [
+        {
+          "task_id": "seed_context_success_workflow",
+          "goal": "context recall hygiene report",
+          "status": "completed",
+          "plan_summary": "Use a short file action and keep context recall compact.",
+          "result_message": "context recall hygiene completed",
+          "created_at": "2026-05-19T00:00:00+00:00"
+        },
+        {
+          "task_id": "seed_context_failed_workflow",
+          "goal": "context recall hygiene report",
+          "status": "failed",
+          "plan_summary": "This failed workflow must not be treated as a positive reference.",
+          "result_message": "context recall hygiene failed",
+          "created_at": "2026-05-20T00:00:00+00:00"
+        }
+      ],
+      "setup_vector_memory": [
+        {
+          "entry_id": "seed_context_success_workflow",
+          "source_type": "task",
+          "text": "context recall hygiene report duplicate vector entry for a completed workflow",
+          "metadata": {
+            "task_id": "seed_context_success_workflow",
+            "status": "completed"
+          }
+        },
+        {
+          "entry_id": "seed_context_failed_vector",
+          "source_type": "task",
+          "text": "context recall hygiene report failed vector entry that should not be positive context",
+          "metadata": {
+            "task_id": "seed_context_failed_vector",
+            "status": "failed"
+          }
+        },
+        {
+          "entry_id": "seed_context_supplemental_vector",
+          "source_type": "task",
+          "text": "context recall hygiene report supplemental compact vector evidence",
+          "metadata": {
+            "task_id": "seed_context_supplemental_vector",
+            "status": "completed"
+          }
+        }
+      ],
+      "goal": "context recall hygiene report: write reports/context_recall_hygiene.md containing context_recall: ok.",
+      "expected_output": "reports/context_recall_hygiene.md contains context_recall: ok; Planner context excludes failed and duplicate recall payloads.",
+      "executor": "file",
+      "payload": {
+        "action": "write",
+        "path": "reports/context_recall_hygiene.md",
+        "content": "context_recall: ok\n",
+        "overwrite": true
+      },
+      "max_permission": "L2",
+      "timeout": 90,
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/context_recall_hygiene.md", "text": "context_recall: ok"}
+        ],
+        "required_workflow_match_task_any": ["seed_context_success_workflow"],
+        "forbidden_workflow_match_task_any": ["seed_context_failed_workflow"],
+        "required_vector_match_entry_any": ["seed_context_supplemental_vector"],
+        "forbidden_vector_match_entry_any": [
+          "seed_context_success_workflow",
+          "seed_context_failed_vector"
+        ],
+        "max_vector_match_count": 1,
+        "forbid_raw_embedding_in_vector_matches": true,
+        "max_request_payload_field_json_chars": [
+          {"field": "vector_matches", "max": 6000}
+        ]
+      }
+    },
+    {
+      "id": "semantic_memory_recall_incident_brief",
+      "kind": "task",
+      "category": "complex_memory",
+      "requires": ["complex"],
+      "setup_files": {
+        "inputs/incident_notes.md": "incident: checkout latency\npriority: high\nservice_owner: platform\nmissing_control: rollback checklist\n"
+      },
+      "setup_vector_memory": [
+        {
+          "entry_id": "eval_seed_incident_review",
+          "source_type": "task",
+          "text": "历史经验：处理事故复盘摘要时，先读取 incident notes，保留 priority 和 service_owner 字段，并把 missing_control 转成 followup 行写入 reports/incident_brief.md。",
+          "metadata": {
+            "task_id": "eval_seed_incident_review",
+            "status": "completed",
+            "source": "REAL-EVAL-006"
+          }
+        }
+      ],
+      "goal": "Use relevant vector memory if available. Read inputs/incident_notes.md and create reports/incident_brief.md with exactly these lines: incident: checkout latency, priority: high, owner: platform, followup: rollback checklist.",
+      "expected_output": "reports/incident_brief.md contains the incident summary and the run records a compatible local_model vector recall hit.",
+      "max_permission": "L2",
+      "timeout": 120,
+      "preferred_skills": ["builtin.file.basic"],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/incident_brief.md", "text": "incident: checkout latency"},
+          {"path": "reports/incident_brief.md", "text": "priority: high"},
+          {"path": "reports/incident_brief.md", "text": "owner: platform"},
+          {"path": "reports/incident_brief.md", "text": "followup: rollback checklist"}
+        ],
+        "required_skill_any": ["builtin.file.basic"],
+        "min_vector_match_count": 1,
+        "required_vector_match_entry_any": ["eval_seed_incident_review"],
+        "required_embedding_provider_any": ["local_model"],
+        "require_vector_compatible": true,
+        "forbid_embedding_fallback": true,
+        "forbid_embedding_errors": true
+      }
+    },
+    {
+      "id": "chat_nested_reference_revision",
+      "kind": "chat_sequence",
+      "category": "complex_conversation",
+      "requires": ["complex"],
+      "max_permission": "L2",
+      "timeout": 120,
+      "preferred_skills": ["builtin.file.basic"],
+      "turns": [
+        {
+          "message": "Create briefs/alpha.md with exactly two lines: project: alpha and risk: medium.",
+          "expected_output": "briefs/alpha.md contains project: alpha and risk: medium."
+        },
+        {
+          "message": "Create briefs/beta.md with exactly two lines: project: beta and risk: low.",
+          "expected_output": "briefs/beta.md contains project: beta and risk: low."
+        },
+        {
+          "message": "For the first brief, append owner: ops. Do not change the second brief.",
+          "expected_output": "briefs/alpha.md contains owner: ops and briefs/beta.md is unchanged."
+        },
+        {
+          "message": "Now summarize only the brief I just modified into reports/selected_brief.md with selected_project: alpha, selected_risk: medium, selected_owner: ops.",
+          "expected_output": "reports/selected_brief.md summarizes alpha, not beta."
+        }
+      ],
+      "assertions": {
+        "must_succeed": true,
+        "min_thread_ids": 1,
+        "file_contains": [
+          {"path": "briefs/alpha.md", "text": "project: alpha"},
+          {"path": "briefs/alpha.md", "text": "risk: medium"},
+          {"path": "briefs/alpha.md", "text": "owner: ops"},
+          {"path": "briefs/beta.md", "text": "project: beta"},
+          {"path": "briefs/beta.md", "text": "risk: low"},
+          {"path": "reports/selected_brief.md", "text": "selected_project: alpha"},
+          {"path": "reports/selected_brief.md", "text": "selected_risk: medium"},
+          {"path": "reports/selected_brief.md", "text": "selected_owner: ops"}
+        ],
+        "file_not_contains": [
+          {"path": "briefs/beta.md", "text": "owner: ops"},
+          {"path": "reports/selected_brief.md", "text": "selected_project: beta"}
+        ],
+        "required_skill_any": ["builtin.file.basic"],
+        "forbidden_skill_any": ["builtin.shell.safe"]
+      }
+    },
+    {
+      "id": "completion_detects_incomplete_requirements",
+      "kind": "task",
+      "category": "complex_completion",
+      "requires": ["complex"],
+      "setup_files": {
+        "inputs/release_checklist.md": "release: mobile-2.1\nmust_include: owner, rollback, launch_window\nowner: growth\nrollback: feature flag mobile_21\nlaunch_window: 2026-05-20 09:00 UTC\n"
+      },
+      "goal": "Read inputs/release_checklist.md and create reports/release_readiness.md. The report must contain release: mobile-2.1, owner: growth, rollback: feature flag mobile_21, and launch_window: 2026-05-20 09:00 UTC. Do not omit any required field.",
+      "expected_output": "reports/release_readiness.md contains every required release readiness field.",
+      "max_permission": "L2",
+      "timeout": 120,
+      "preferred_skills": ["builtin.file.basic"],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/release_readiness.md", "text": "release: mobile-2.1"},
+          {"path": "reports/release_readiness.md", "text": "owner: growth"},
+          {"path": "reports/release_readiness.md", "text": "rollback: feature flag mobile_21"},
+          {"path": "reports/release_readiness.md", "text": "launch_window: 2026-05-20 09:00 UTC"}
+        ],
+        "required_skill_any": ["builtin.file.basic"],
+        "forbid_model_capability_suspected": true
+      }
+    },
+    {
+      "id": "context_budget_many_memories_keeps_relevant_matches",
+      "kind": "task",
+      "category": "complex_context",
+      "requires": ["complex"],
+      "setup_workflow_memory": [
+        {
+          "task_id": "seed_context_budget_release_packet",
+          "goal": "release omega-17 escalation packet",
+          "status": "completed",
+          "plan_summary": "Write a compact escalation packet with owner, risk, and next_action fields.",
+          "result_message": "release omega-17 escalation packet completed",
+          "created_at": "2026-05-18T00:00:00+00:00"
+        },
+        {
+          "task_id": "seed_context_budget_failed_release_packet",
+          "goal": "release omega-17 escalation packet",
+          "status": "failed",
+          "plan_summary": "This failed workflow should not be used as a positive reference.",
+          "result_message": "failed before writing the escalation packet",
+          "created_at": "2026-05-19T00:00:00+00:00"
+        },
+        {
+          "task_id": "seed_context_budget_invoice",
+          "goal": "monthly invoice reconciliation",
+          "status": "completed",
+          "plan_summary": "Summarize invoices and payments.",
+          "result_message": "invoice reconciliation completed",
+          "created_at": "2026-05-16T00:00:00+00:00"
+        },
+        {
+          "task_id": "seed_context_budget_html",
+          "goal": "extract html title from local page",
+          "status": "completed",
+          "plan_summary": "Use HTML parser to extract title and links.",
+          "result_message": "html extraction completed",
+          "created_at": "2026-05-15T00:00:00+00:00"
+        },
+        {
+          "task_id": "seed_context_budget_archive",
+          "goal": "create archive bundle",
+          "status": "completed",
+          "plan_summary": "Create a zip archive from input files.",
+          "result_message": "archive bundle completed",
+          "created_at": "2026-05-14T00:00:00+00:00"
+        },
+        {
+          "task_id": "seed_context_budget_markdown",
+          "goal": "update markdown runbook section",
+          "status": "completed",
+          "plan_summary": "Replace one markdown section while preserving the others.",
+          "result_message": "markdown update completed",
+          "created_at": "2026-05-13T00:00:00+00:00"
+        }
+      ],
+      "setup_vector_memory": [
+        {
+          "entry_id": "seed_context_budget_release_vector",
+          "source_type": "task",
+          "text": "release omega-17 escalation packet should include owner platform, risk elevated, and next_action page oncall lead",
+          "metadata": {
+            "task_id": "seed_context_budget_release_vector",
+            "status": "completed"
+          }
+        },
+        {
+          "entry_id": "seed_context_budget_failed_vector",
+          "source_type": "task",
+          "text": "release omega-17 escalation packet failed draft with stale owner data",
+          "metadata": {
+            "task_id": "seed_context_budget_failed_vector",
+            "status": "failed"
+          }
+        },
+        {
+          "entry_id": "seed_context_budget_decoy_vector",
+          "source_type": "task",
+          "text": "invoice reconciliation archive html markdown unrelated memory",
+          "metadata": {
+            "task_id": "seed_context_budget_decoy_vector",
+            "status": "completed"
+          }
+        }
+      ],
+      "goal": "release omega-17 escalation packet: write reports/omega_escalation.md containing owner: platform, risk: elevated, and next_action: page oncall lead.",
+      "expected_output": "reports/omega_escalation.md exists and Planner context keeps relevant compact recall while excluding failed memory.",
+      "executor": "file",
+      "payload": {
+        "action": "write",
+        "path": "reports/omega_escalation.md",
+        "content": "owner: platform\nrisk: elevated\nnext_action: page oncall lead\n",
+        "overwrite": true
+      },
+      "max_permission": "L2",
+      "timeout": 120,
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/omega_escalation.md", "text": "owner: platform"},
+          {"path": "reports/omega_escalation.md", "text": "risk: elevated"},
+          {"path": "reports/omega_escalation.md", "text": "next_action: page oncall lead"}
+        ],
+        "required_workflow_match_task_any": ["seed_context_budget_release_packet"],
+        "forbidden_workflow_match_task_any": ["seed_context_budget_failed_release_packet"],
+        "required_vector_match_entry_any": ["seed_context_budget_release_vector"],
+        "forbidden_vector_match_entry_any": ["seed_context_budget_failed_vector"],
+        "max_vector_match_count": 3,
+        "forbid_raw_embedding_in_vector_matches": true,
+        "max_request_payload_field_json_chars": [
+          {"field": "workflow_matches", "max": 12000},
+          {"field": "vector_matches", "max": 8000}
+        ]
+      }
+    },
+    {
+      "id": "chat_reference_survives_status_and_correction",
+      "kind": "chat_sequence",
+      "category": "complex_conversation",
+      "requires": ["complex"],
+      "max_permission": "L2",
+      "timeout": 150,
+      "preferred_skills": ["builtin.file.basic"],
+      "turns": [
+        {
+          "message": "Create ops/alpha.md with exactly three lines: service: alpha, owner: platform, severity: medium.",
+          "expected_output": "ops/alpha.md contains the alpha service record."
+        },
+        {
+          "message": "Create ops/beta.md with exactly three lines: service: beta, owner: growth, severity: low.",
+          "expected_output": "ops/beta.md contains the beta service record."
+        },
+        {
+          "message": "In the first service file, change only severity to severity: high and append modified: yes. Do not change the second service file.",
+          "expected_output": "ops/alpha.md has severity high and modified yes, while ops/beta.md remains low."
+        },
+        {
+          "message": "What is the current task status?",
+          "expected_output": "Answer the status question without losing the previous modified-file reference."
+        },
+        {
+          "message": "Now summarize the file I modified before that status question into reports/latest_modified_service.md with selected_service: alpha, selected_owner: platform, selected_severity: high, selected_modified: yes.",
+          "expected_output": "reports/latest_modified_service.md summarizes alpha, not beta."
+        }
+      ],
+      "assertions": {
+        "min_successful_turns": 4,
+        "min_thread_ids": 1,
+        "required_route_input_type_any": ["status_query"],
+        "file_contains": [
+          {"path": "ops/alpha.md", "text": "service: alpha"},
+          {"path": "ops/alpha.md", "text": "owner: platform"},
+          {"path": "ops/alpha.md", "text": "severity: high"},
+          {"path": "ops/alpha.md", "text": "modified: yes"},
+          {"path": "ops/beta.md", "text": "service: beta"},
+          {"path": "ops/beta.md", "text": "severity: low"},
+          {"path": "reports/latest_modified_service.md", "text": "selected_service: alpha"},
+          {"path": "reports/latest_modified_service.md", "text": "selected_owner: platform"},
+          {"path": "reports/latest_modified_service.md", "text": "selected_severity: high"},
+          {"path": "reports/latest_modified_service.md", "text": "selected_modified: yes"}
+        ],
+        "file_not_contains": [
+          {"path": "ops/beta.md", "text": "modified: yes"},
+          {"path": "reports/latest_modified_service.md", "text": "selected_service: beta"}
+        ],
+        "required_skill_any": ["builtin.file.basic"],
+        "forbidden_skill_any": ["builtin.shell.safe"]
+      }
+    },
+    {
+      "id": "config_missing_nested_key_fails_with_tool_layer",
+      "kind": "task",
+      "category": "complex_skill_contract",
+      "requires": ["complex"],
+      "setup_files": {
+        "configs/service.toml": "[service]\nname = \"billing\"\n[service.limits]\nretries = 3\n"
+      },
+      "goal": "Use builtin.data.config to read configs/service.toml. Write reports/config_missing.md containing service_name: billing, owner: platform, and retries: 3. If any required key is missing, fail honestly and do not create the report.",
+      "expected_output": "The task fails honestly because owner is missing from configs/service.toml.",
+      "max_permission": "L2",
+      "timeout": 120,
+      "preferred_skills": ["builtin.data.config"],
+      "assertions": {
+        "must_not_succeed": true,
+        "file_not_exists": ["reports/config_missing.md"],
+        "required_skill_any": ["builtin.data.config"],
+        "forbidden_skill_any": ["builtin.python.basic", "builtin.shell.safe"],
+        "required_node_status_any": ["failed"],
+        "required_failure_layer_any": ["skill_or_tool"],
+        "diagnosis_any": ["executor_or_skill_contract"]
+      }
+    },
+    {
+      "id": "archive_extract_rejects_traversal_entry",
+      "kind": "task",
+      "category": "complex_security",
+      "requires": ["complex"],
+      "setup_archives": [
+        {
+          "path": "inputs/unsafe.zip",
+          "entries": [
+            {"name": "../escape.txt", "content": "bad\n"},
+            {"name": "safe/readme.txt", "content": "ok\n"}
+          ]
+        }
+      ],
+      "goal": "Use builtin.archive.basic to extract inputs/unsafe.zip into extracted/. The archive contains an unsafe traversal entry, so fail honestly and do not write reports/archive_extract.md.",
+      "expected_output": "Archive extraction fails with a skill/tool validation error and does not extract traversal content.",
+      "max_permission": "L2",
+      "timeout": 120,
+      "preferred_skills": ["builtin.archive.basic"],
+      "assertions": {
+        "must_not_succeed": true,
+        "file_not_exists": [
+          "escape.txt",
+          "extracted/escape.txt",
+          "extracted/safe/readme.txt",
+          "reports/archive_extract.md"
+        ],
+        "required_skill_any": ["builtin.archive.basic"],
+        "forbidden_skill_any": ["builtin.python.basic", "builtin.shell.safe"],
+        "required_node_status_any": ["failed"],
+        "required_failure_layer_any": ["skill_or_tool"],
+        "diagnosis_any": ["executor_or_skill_contract"]
+      }
+    },
+    {
+      "id": "completion_overrides_successful_wrong_file_payload",
+      "kind": "task",
+      "category": "complex_completion",
+      "requires": ["complex"],
+      "goal": "Create reports/quality_gate.md with exactly two lines: gate: pass and owner: qa.",
+      "expected_output": "reports/quality_gate.md must contain gate: pass and owner: qa.",
+      "executor": "file",
+      "payload": {
+        "action": "write",
+        "path": "reports/quality_gate.md",
+        "content": "gate: fail\nowner: qa\n",
+        "overwrite": true
+      },
+      "max_permission": "L2",
+      "timeout": 120,
+      "assertions": {
+        "must_not_succeed": true,
+        "file_contains": [
+          {"path": "reports/quality_gate.md", "text": "gate: fail"},
+          {"path": "reports/quality_gate.md", "text": "owner: qa"}
+        ],
+        "file_not_contains": [
+          {"path": "reports/quality_gate.md", "text": "gate: pass"}
+        ],
+        "required_completion_failure_layer_any": [
+          "agent_flow",
+          "planner_or_skill_selection",
+          "tool_or_skill",
+          "model_capability"
+        ],
+        "forbid_model_capability_suspected": true
+      }
+    },
+    {
+      "id": "sqlite_ticket_summary_report",
+      "kind": "task",
+      "category": "basecap_v1_data",
+      "setup_sqlite": [
+        {
+          "path": "inputs/support.sqlite3",
+          "schema": ["CREATE TABLE tickets(team TEXT, points INTEGER)"],
+          "rows": {
+            "tickets": {
+              "columns": ["team", "points"],
+              "values": [["alpha", 4], ["beta", 6], ["alpha", 5]]
+            }
+          }
+        }
+      ],
+      "goal": "Use builtin.data.sqlite to read inputs/support.sqlite3. Write reports/sqlite_summary.md containing ticket_count: 3 and total_points: 15.",
+      "expected_output": "reports/sqlite_summary.md contains ticket_count: 3 and total_points: 15, and the task uses builtin.data.sqlite.",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.data.sqlite"],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/sqlite_summary.md", "text": "ticket_count: 3"},
+          {"path": "reports/sqlite_summary.md", "text": "total_points: 15"}
+        ],
+        "required_skill_any": ["builtin.data.sqlite"],
+        "forbidden_skill_any": ["builtin.python.basic", "builtin.shell.safe"]
+      }
+    },
+    {
+      "id": "markdown_section_update",
+      "kind": "task",
+      "category": "basecap_v1_text",
+      "setup_files": {
+        "docs/runbook.md": "# Runbook\n\n## Status\nstate: draft\n\n## Owner\nteam: platform\n"
+      },
+      "goal": "Use builtin.text.markdown to update only the Status section in docs/runbook.md so it contains state: ready. Keep the Owner section unchanged.",
+      "expected_output": "docs/runbook.md has state: ready, keeps team: platform, and uses builtin.text.markdown.",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.text.markdown"],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "docs/runbook.md", "text": "state: ready"},
+          {"path": "docs/runbook.md", "text": "team: platform"}
+        ],
+        "file_not_contains": [
+          {"path": "docs/runbook.md", "text": "state: draft"}
+        ],
+        "required_skill_any": ["builtin.text.markdown"],
+        "forbidden_skill_any": ["builtin.python.basic", "builtin.shell.safe"]
+      }
+    },
+    {
+      "id": "config_toml_report",
+      "kind": "task",
+      "category": "basecap_v1_config",
+      "setup_files": {
+        "configs/service.toml": "[service]\nname = \"billing\"\nowner = \"platform\"\nretries = 3\n"
+      },
+      "goal": "Use builtin.data.config to read configs/service.toml. Write reports/config_summary.md containing service_name: billing, owner: platform, and retries: 3.",
+      "expected_output": "reports/config_summary.md contains service_name: billing, owner: platform, retries: 3, and uses builtin.data.config.",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.data.config"],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/config_summary.md", "text": "service_name: billing"},
+          {"path": "reports/config_summary.md", "text": "owner: platform"},
+          {"path": "reports/config_summary.md", "text": "retries: 3"}
+        ],
+        "required_skill_any": ["builtin.data.config"],
+        "forbidden_skill_any": ["builtin.python.basic"]
+      }
+    },
+    {
+      "id": "html_extract_local_report",
+      "kind": "task",
+      "category": "basecap_v1_web",
+      "setup_files": {
+        "inputs/page.html": "<html><head><title>Service Status</title></head><body><h1>OK</h1><a href=\"/docs\">Docs</a></body></html>"
+      },
+      "goal": "Use builtin.web.html to parse inputs/page.html. Write reports/page_summary.md containing title: Service Status and link_count: 1.",
+      "expected_output": "reports/page_summary.md contains extracted HTML title and link count.",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.web.html"],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/page_summary.md", "text": "title: Service Status"},
+          {"path": "reports/page_summary.md", "text": "link_count: 1"}
+        ],
+        "required_skill_any": ["builtin.web.html"],
+        "forbidden_skill_any": ["builtin.python.basic"]
+      }
+    },
+    {
+      "id": "archive_create_bundle",
+      "kind": "task",
+      "category": "basecap_v1_archive",
+      "setup_files": {
+        "inputs/a.txt": "alpha\n",
+        "inputs/b.txt": "beta\n"
+      },
+      "goal": "Use builtin.archive.basic to create outputs/bundle.zip from the inputs directory. Then write reports/archive_summary.md containing archive_created: true.",
+      "expected_output": "outputs/bundle.zip exists, reports/archive_summary.md confirms creation, and the task uses builtin.archive.basic.",
+      "max_permission": "L2",
+      "timeout": 90,
+      "preferred_skills": ["builtin.archive.basic"],
+      "assertions": {
+        "must_succeed": true,
+        "file_exists": ["outputs/bundle.zip"],
+        "file_contains": [
+          {"path": "reports/archive_summary.md", "text": "archive_created: true"}
+        ],
+        "required_skill_any": ["builtin.archive.basic"],
+        "forbidden_skill_any": ["builtin.python.basic", "builtin.shell.safe"]
+      }
+    },
+    {
+      "id": "git_status_readonly_report",
+      "kind": "task",
+      "category": "basecap_v1_git",
+      "requires": ["l4"],
+      "setup_files": {
+        "tracked.txt": "clean\n"
+      },
+      "setup_git_repo": true,
+      "setup_git_changes": {
+        "tracked.txt": "dirty\n"
+      },
+      "goal": "Use builtin.vcs.git to inspect git status in the workspace. Write reports/git_status.md containing changed_file: tracked.txt.",
+      "expected_output": "reports/git_status.md contains changed_file: tracked.txt and the task uses builtin.vcs.git.",
+      "max_permission": "L4",
+      "timeout": 90,
+      "preferred_skills": ["builtin.vcs.git"],
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/git_status.md", "text": "changed_file: tracked.txt"}
+        ],
+        "required_skill_any": ["builtin.vcs.git"],
+        "forbidden_skill_any": ["builtin.python.basic"]
+      }
+    }
+  ]
+}

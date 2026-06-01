@@ -1,0 +1,75 @@
+{
+  "name": "builtin.vcs.git",
+  "version": "0.1.0",
+  "description": "Read-only git status, diff, log, and show via git CLI with process permission.",
+  "input_schema": {"action": "string", "cwd": "string", "paths": "array", "rev": "string", "max_count": "integer", "stat": "boolean", "max_output_chars": "integer"},
+  "output_schema": {"argv": "array", "cwd": "string", "returncode": "integer", "stdout": "string", "stderr": "string", "stdout_truncated": "boolean", "stderr_truncated": "boolean"},
+  "permission_requirements": ["system.exec"],
+  "dependency_requirements": ["git"],
+  "side_effects": ["process_execution"],
+  "sandbox_level": "process",
+  "tags": ["git", "vcs", "readonly", "builtin"],
+  "contracts": [
+    {
+      "action": "status",
+      "description": "Run git status --short",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "cwd", "type": "string", "required": false},
+        {"name": "paths", "type": "array", "required": false},
+        {"name": "max_output_chars", "type": "integer", "required": false}
+      ],
+      "output_fields": [
+        {"name": "stdout", "type": "string"},
+        {"name": "returncode", "type": "integer"}
+      ],
+      "side_effects": ["process_execution"]
+    },
+    {
+      "action": "diff",
+      "description": "Run read-only git diff",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "cwd", "type": "string", "required": false},
+        {"name": "paths", "type": "array", "required": false},
+        {"name": "stat", "type": "boolean", "required": false},
+        {"name": "max_output_chars", "type": "integer", "required": false}
+      ],
+      "output_fields": [
+        {"name": "stdout", "type": "string"},
+        {"name": "returncode", "type": "integer"}
+      ],
+      "side_effects": ["process_execution"]
+    },
+    {
+      "action": "log",
+      "description": "Run git log --oneline with bounded count",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "cwd", "type": "string", "required": false},
+        {"name": "max_count", "type": "integer", "required": false},
+        {"name": "max_output_chars", "type": "integer", "required": false}
+      ],
+      "output_fields": [
+        {"name": "stdout", "type": "string"},
+        {"name": "returncode", "type": "integer"}
+      ],
+      "side_effects": ["process_execution"]
+    },
+    {
+      "action": "show",
+      "description": "Run git show --stat for a revision",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "rev", "type": "string", "required": false},
+        {"name": "cwd", "type": "string", "required": false},
+        {"name": "max_output_chars", "type": "integer", "required": false}
+      ],
+      "output_fields": [
+        {"name": "stdout", "type": "string"},
+        {"name": "returncode", "type": "integer"}
+      ],
+      "side_effects": ["process_execution"]
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "name": "builtin.datetime.format",
+  "version": "0.1.0",
+  "description": "Parse, format, diff, and add datetimes with stdlib datetime and zoneinfo.",
+  "input_schema": {"action": "string", "value": "string", "timezone": "string", "input_format": "string", "output_format": "string", "amount": "number", "unit": "string", "start": "string", "end": "string"},
+  "output_schema": {"value": "string", "iso": "string", "timestamp": "number", "timezone": "string", "diff": "object"},
+  "permission_requirements": [],
+  "dependency_requirements": [],
+  "side_effects": [],
+  "sandbox_level": "workspace",
+  "tags": ["datetime", "time", "builtin"],
+  "contracts": [
+    {
+      "action": "now",
+      "description": "Return current time in the requested timezone",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "timezone", "type": "string", "required": false}
+      ],
+      "output_fields": [
+        {"name": "value", "type": "string"},
+        {"name": "iso", "type": "string"},
+        {"name": "timestamp", "type": "number"},
+        {"name": "timezone", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "parse",
+      "description": "Parse an ISO datetime, timestamp, or custom input format",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "value", "type": "string", "required": true},
+        {"name": "timezone", "type": "string", "required": false},
+        {"name": "input_format", "type": "string", "required": false}
+      ],
+      "output_fields": [
+        {"name": "value", "type": "string"},
+        {"name": "iso", "type": "string"},
+        {"name": "timestamp", "type": "number"},
+        {"name": "timezone", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "format",
+      "description": "Format a datetime with strftime syntax",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "value", "type": "string", "required": true},
+        {"name": "timezone", "type": "string", "required": false},
+        {"name": "input_format", "type": "string", "required": false},
+        {"name": "output_format", "type": "string", "required": true}
+      ],
+      "output_fields": [
+        {"name": "value", "type": "string"},
+        {"name": "iso", "type": "string"},
+        {"name": "timestamp", "type": "number"},
+        {"name": "timezone", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "diff",
+      "description": "Return the duration between start and end",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "start", "type": "string", "required": true},
+        {"name": "end", "type": "string", "required": true},
+        {"name": "timezone", "type": "string", "required": false},
+        {"name": "input_format", "type": "string", "required": false}
+      ],
+      "output_fields": [
+        {"name": "diff", "type": "object"},
+        {"name": "timezone", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "add",
+      "description": "Add seconds, minutes, hours, days, or weeks to a datetime",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "value", "type": "string", "required": false},
+        {"name": "timezone", "type": "string", "required": false},
+        {"name": "input_format", "type": "string", "required": false},
+        {"name": "amount", "type": "number", "required": true},
+        {"name": "unit", "type": "string", "required": true}
+      ],
+      "output_fields": [
+        {"name": "value", "type": "string"},
+        {"name": "iso", "type": "string"},
+        {"name": "timestamp", "type": "number"},
+        {"name": "timezone", "type": "string"}
+      ],
+      "side_effects": []
+    }
+  ]
+}

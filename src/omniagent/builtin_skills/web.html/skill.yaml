@@ -1,0 +1,62 @@
+{
+  "name": "builtin.web.html",
+  "version": "0.1.0",
+  "description": "Parse HTML title, text, links, metadata, tables, and write concise evidence reports.",
+  "input_schema": {"action": "string", "path": "string", "text": "string", "output_path": "string", "max_text_chars": "integer"},
+  "output_schema": {"title": "string", "text": "string", "links": "array", "meta": "object", "tables": "array", "path": "string", "output_path": "string"},
+  "permission_requirements": ["filesystem.read"],
+  "dependency_requirements": [],
+  "side_effects": ["workspace_files"],
+  "sandbox_level": "workspace",
+  "tags": ["html", "web", "extract", "browser", "builtin"],
+  "contracts": [
+    {
+      "action": "extract",
+      "description": "Extract title, readable text, links, meta, and simple tables from HTML text or file",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": false},
+        {"name": "text", "type": "string", "required": false},
+        {"name": "max_text_chars", "type": "integer", "required": false}
+      ],
+      "output_fields": [
+        {"name": "title", "type": "string"},
+        {"name": "text", "type": "string"},
+        {"name": "links", "type": "array"},
+        {"name": "meta", "type": "object"},
+        {"name": "tables", "type": "array"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "links",
+      "description": "Extract links from HTML",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": false},
+        {"name": "text", "type": "string", "required": false}
+      ],
+      "output_fields": [
+        {"name": "links", "type": "array"},
+        {"name": "path", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "report",
+      "description": "Extract HTML evidence and write title/link/text summary lines",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "output_path", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": false},
+        {"name": "text", "type": "string", "required": false},
+        {"name": "max_text_chars", "type": "integer", "required": false}
+      ],
+      "output_fields": [
+        {"name": "title", "type": "string"},
+        {"name": "output_path", "type": "string"}
+      ],
+      "side_effects": ["filesystem.write"]
+    }
+  ]
+}

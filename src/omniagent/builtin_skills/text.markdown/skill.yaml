@@ -1,0 +1,89 @@
+{
+  "name": "builtin.text.markdown",
+  "version": "0.1.0",
+  "description": "Extract headings, sections, pipe tables, and edit Markdown sections in workspace files.",
+  "input_schema": {"action": "string", "path": "string", "text": "string", "heading": "string", "content": "string", "output_path": "string", "table_index": "integer", "overwrite": "boolean"},
+  "output_schema": {"headings": "array", "section": "string", "tables": "array", "rows": "array", "path": "string", "output_path": "string"},
+  "permission_requirements": ["filesystem.read"],
+  "dependency_requirements": [],
+  "side_effects": ["workspace_files"],
+  "sandbox_level": "workspace",
+  "tags": ["markdown", "text", "document", "builtin"],
+  "contracts": [
+    {
+      "action": "headings",
+      "description": "Extract Markdown ATX headings",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": false},
+        {"name": "text", "type": "string", "required": false}
+      ],
+      "output_fields": [
+        {"name": "headings", "type": "array"},
+        {"name": "path", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "extract_section",
+      "description": "Extract the section under a Markdown heading",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "heading", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": false},
+        {"name": "text", "type": "string", "required": false}
+      ],
+      "output_fields": [
+        {"name": "section", "type": "string"},
+        {"name": "path", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "replace_section",
+      "description": "Replace an existing heading section or write the edited Markdown to output_path",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": true},
+        {"name": "heading", "type": "string", "required": true},
+        {"name": "content", "type": "string", "required": true},
+        {"name": "output_path", "type": "string", "required": false},
+        {"name": "overwrite", "type": "boolean", "required": false}
+      ],
+      "output_fields": [
+        {"name": "path", "type": "string"},
+        {"name": "output_path", "type": "string"}
+      ],
+      "side_effects": ["filesystem.read", "filesystem.write"]
+    },
+    {
+      "action": "append_section",
+      "description": "Append a new Markdown section to a file",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": true},
+        {"name": "heading", "type": "string", "required": true},
+        {"name": "content", "type": "string", "required": true}
+      ],
+      "output_fields": [
+        {"name": "path", "type": "string"}
+      ],
+      "side_effects": ["filesystem.read", "filesystem.write"]
+    },
+    {
+      "action": "table",
+      "description": "Extract a simple Markdown pipe table",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": false},
+        {"name": "text", "type": "string", "required": false},
+        {"name": "table_index", "type": "integer", "required": false}
+      ],
+      "output_fields": [
+        {"name": "tables", "type": "array"},
+        {"name": "rows", "type": "array"}
+      ],
+      "side_effects": []
+    }
+  ]
+}

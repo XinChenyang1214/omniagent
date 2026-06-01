@@ -1,0 +1,60 @@
+{
+  "name": "builtin.archive.basic",
+  "version": "0.1.0",
+  "description": "List, extract, and create zip/tar archives inside the workspace with traversal protection.",
+  "input_schema": {"action": "string", "path": "string", "output_path": "string", "output_dir": "string", "paths": "array", "format": "string", "overwrite": "boolean"},
+  "output_schema": {"entries": "array", "path": "string", "output_path": "string", "output_dir": "string", "format": "string"},
+  "permission_requirements": ["filesystem.read"],
+  "dependency_requirements": [],
+  "side_effects": ["workspace_files"],
+  "sandbox_level": "workspace",
+  "tags": ["archive", "zip", "tar", "builtin"],
+  "contracts": [
+    {
+      "action": "list",
+      "description": "List files inside a zip or tar archive",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": true}
+      ],
+      "output_fields": [
+        {"name": "entries", "type": "array"},
+        {"name": "format", "type": "string"},
+        {"name": "path", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "extract",
+      "description": "Extract a zip or tar archive into a workspace directory",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": true},
+        {"name": "output_dir", "type": "string", "required": true},
+        {"name": "overwrite", "type": "boolean", "required": false}
+      ],
+      "output_fields": [
+        {"name": "entries", "type": "array"},
+        {"name": "output_dir", "type": "string"}
+      ],
+      "side_effects": ["filesystem.write"]
+    },
+    {
+      "action": "create",
+      "description": "Create a zip or tar archive from workspace files or directories",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "paths", "type": "array", "required": true},
+        {"name": "output_path", "type": "string", "required": true},
+        {"name": "format", "type": "string", "required": false},
+        {"name": "overwrite", "type": "boolean", "required": false}
+      ],
+      "output_fields": [
+        {"name": "entries", "type": "array"},
+        {"name": "output_path", "type": "string"},
+        {"name": "format", "type": "string"}
+      ],
+      "side_effects": ["filesystem.read", "filesystem.write"]
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+# OmniAgent 配置文件
+# 环境变量优先级高于此文件（环境变量会覆盖文件中的值）
+
+[llm]
+provider = "openai"           # openai / deepseek / ark / ollama / 任意 OpenAI 兼容服务
+model = "qwen3.6-plus"         # 模型名称
+# api_key intentionally omitted; use OMNIAGENT_LLM_API_KEY
+api_base = "https://dashscope.aliyuncs.com/compatible-mode/v1"                 # API 地址，留空则使用 provider 默认地址
+temperature = 0.0             # 生成温度
+timeout_seconds = 120        # 单次请求超时（秒）— Dashscope/Qwen 较慢，给足 buffer
+max_retries = 2               # 失败重试次数
+fallback_provider = ""        # 降级 provider（主 provider 失败时切换）
+enable_runtime_fallback = true
+verify_on_startup = false     # 启动时是否执行 LLM 健康检查
+
+[embedding]
+enabled = true
+provider = "local_model"
+model = "bge-small-zh-v1.5"
+model_path = "models/embedding/bge-small-zh-v1.5/onnx/model_quantized.onnx"
+tokenizer_path = "models/embedding/bge-small-zh-v1.5/tokenizer.json"
+dimensions = 512
+pooling = "cls"
+normalize = true
+max_tokens = 512
+timeout_seconds = 30
+max_retries = 1
+
+[gateway]
+app_name = "omniagent"
+default_mode = "semi_auto"    # assist / semi_auto / full_auto
+task_timeout_seconds = 1200   # 默认任务超时（秒），CLI --timeout 可覆盖
+
+[sandbox]
+enabled = true
+timeout_seconds = 30
+allow_network = false
+# authorized_paths = ["~/Downloads", "~/Desktop"]
+# path_intents = {下载 = "~/Downloads", 桌面 = "~/Desktop"}
+
+[playwright]
+enabled = false
+browser = "chromium"
+
+[logging]
+level = "INFO"
+json_logs = true
+# file_path = ""              # 留空则使用默认路径 artifacts/omniagent.log

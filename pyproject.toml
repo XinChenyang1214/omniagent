@@ -1,0 +1,43 @@
+[build-system]
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
+
+[project]
+name = "omniagent"
+version = "0.1.0"
+description = "Task-centric local runtime skeleton for OmniAgent."
+readme = "README.md"
+requires-python = ">=3.11,<4.0"
+authors = [
+  { name = "OmniAgent Contributors", email = "devnull@example.com" },
+]
+dependencies = [
+  "numpy>=2.3.3",
+  "onnxruntime>=1.25.1",
+  "tokenizers>=0.23.1",
+]
+
+[project.scripts]
+omniagent = "omniagent.cli:main"
+
+[tool.poetry]
+packages = [
+  { include = "omniagent", from = "src" },
+]
+include = [
+  { path = "src/omniagent/builtin_skills/**/*", format = ["sdist", "wheel"] },
+  { path = "src/omniagent/prompts/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0"
+ruff = ">=0.6"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]

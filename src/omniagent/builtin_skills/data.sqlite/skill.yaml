@@ -1,0 +1,94 @@
+{
+  "name": "builtin.data.sqlite",
+  "version": "0.1.0",
+  "description": "Read-only SQLite inspection, query, CSV export, and label report generation.",
+  "input_schema": {"action": "string", "path": "string", "table": "string", "sql": "string", "params": "array", "queries": "array", "output_path": "string", "max_rows": "integer"},
+  "output_schema": {"tables": "array", "columns": "array", "rows": "array", "row_count": "integer", "truncated": "boolean", "result": "object", "path": "string", "output_path": "string"},
+  "permission_requirements": ["filesystem.read"],
+  "dependency_requirements": [],
+  "side_effects": ["workspace_files"],
+  "sandbox_level": "workspace",
+  "tags": ["sqlite", "database", "data", "builtin"],
+  "contracts": [
+    {
+      "action": "list_tables",
+      "description": "List user tables and views in a workspace SQLite database",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": true}
+      ],
+      "output_fields": [
+        {"name": "tables", "type": "array"},
+        {"name": "path", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "schema",
+      "description": "Return CREATE statements for one table or all user tables/views",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": true},
+        {"name": "table", "type": "string", "required": false}
+      ],
+      "output_fields": [
+        {"name": "result", "type": "object"},
+        {"name": "path", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "query",
+      "description": "Run a read-only SELECT/WITH/PRAGMA query with bounded rows",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": true},
+        {"name": "sql", "type": "string", "required": true},
+        {"name": "params", "type": "array", "required": false},
+        {"name": "max_rows", "type": "integer", "required": false}
+      ],
+      "output_fields": [
+        {"name": "columns", "type": "array"},
+        {"name": "rows", "type": "array"},
+        {"name": "row_count", "type": "integer"},
+        {"name": "truncated", "type": "boolean"},
+        {"name": "path", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "export_csv",
+      "description": "Run a read-only query and write the result as CSV in the workspace",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": true},
+        {"name": "sql", "type": "string", "required": true},
+        {"name": "output_path", "type": "string", "required": true},
+        {"name": "params", "type": "array", "required": false},
+        {"name": "max_rows", "type": "integer", "required": false}
+      ],
+      "output_fields": [
+        {"name": "columns", "type": "array"},
+        {"name": "row_count", "type": "integer"},
+        {"name": "output_path", "type": "string"}
+      ],
+      "side_effects": ["filesystem.write"]
+    },
+    {
+      "action": "report",
+      "description": "Run one or more scalar read-only queries and write label: value lines",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": true},
+        {"name": "queries", "type": "array", "required": true},
+        {"name": "output_path", "type": "string", "required": true}
+      ],
+      "output_fields": [
+        {"name": "result", "type": "object"},
+        {"name": "path", "type": "string"},
+        {"name": "output_path", "type": "string"}
+      ],
+      "side_effects": ["filesystem.write"]
+    }
+  ]
+}

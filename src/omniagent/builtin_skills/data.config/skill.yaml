@@ -1,0 +1,49 @@
+{
+  "name": "builtin.data.config",
+  "version": "0.1.0",
+  "description": "Query TOML, simple YAML, and XML configuration files by dot path and write label reports. For TOML sections, use queries like service.name with labels like service_name.",
+  "input_schema": {"action": "string", "path": "string", "text": "string", "format": "string", "query": "string", "fields": "array", "output_path": "string"},
+  "output_schema": {"format": "string", "value": "any", "result": "object", "path": "string", "output_path": "string"},
+  "permission_requirements": ["filesystem.read"],
+  "dependency_requirements": [],
+  "side_effects": ["workspace_files"],
+  "sandbox_level": "workspace",
+  "tags": ["config", "toml", "yaml", "xml", "data", "builtin"],
+  "contracts": [
+    {
+      "action": "query",
+      "description": "Query a TOML, simple YAML, or XML config by dot path, for example service.name for [service] name",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "query", "type": "string", "required": true, "description": "Dot path in parsed config, e.g. service.name. Unambiguous aliases like service_name or owner under a single root section are accepted."},
+        {"name": "path", "type": "string", "required": false},
+        {"name": "text", "type": "string", "required": false},
+        {"name": "format", "type": "string", "required": false}
+      ],
+      "output_fields": [
+        {"name": "format", "type": "string"},
+        {"name": "value", "type": "any"},
+        {"name": "path", "type": "string"}
+      ],
+      "side_effects": []
+    },
+    {
+      "action": "report",
+      "description": "Extract multiple config values and write a label: value report. Field label controls output text; field query should be the config dot path.",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "fields", "type": "array", "required": true, "description": "Array of strings or {label, query}; use label for output name and query for config path, e.g. {\"label\":\"service_name\",\"query\":\"service.name\"}."},
+        {"name": "output_path", "type": "string", "required": true},
+        {"name": "path", "type": "string", "required": false},
+        {"name": "text", "type": "string", "required": false},
+        {"name": "format", "type": "string", "required": false}
+      ],
+      "output_fields": [
+        {"name": "format", "type": "string"},
+        {"name": "result", "type": "object"},
+        {"name": "output_path", "type": "string"}
+      ],
+      "side_effects": ["filesystem.write"]
+    }
+  ]
+}

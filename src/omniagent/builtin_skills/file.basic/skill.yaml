@@ -1,0 +1,146 @@
+{
+  "name": "builtin.file.basic",
+  "version": "0.3.0",
+  "description": "List / read / write / append / replace_line / copy / move / rename / delete files inside workspace.",
+  "input_schema": {"action": "string", "path": "string", "source": "string", "target": "string", "content": "string", "line_prefix": "string", "overwrite": "boolean"},
+  "output_schema": {"path": "string", "content": "string", "line_index": "integer", "source": "string", "target": "string", "action": "string"},
+  "permission_requirements": ["filesystem.read"],
+  "dependency_requirements": [],
+  "side_effects": ["workspace_files"],
+  "sandbox_level": "workspace",
+  "tags": ["file", "builtin"],
+  "contracts": [
+    {
+      "action": "list",
+      "description": "List entries under a workspace directory",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true, "description": "Must be 'list'"},
+        {"name": "path", "type": "string", "required": true, "description": "Directory path relative to workspace"}
+      ],
+      "output_fields": [
+        {"name": "entries", "type": "array", "description": "Entries under the directory"},
+        {"name": "path", "type": "string", "description": "Echo of the listed path"}
+      ],
+      "side_effects": ["filesystem.read"]
+    },
+    {
+      "action": "read",
+      "description": "Read a text file from workspace",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true, "description": "Must be 'read'"},
+        {"name": "path", "type": "string", "required": true, "description": "File path relative to workspace"}
+      ],
+      "output_fields": [
+        {"name": "content", "type": "string", "description": "File content as text"},
+        {"name": "path", "type": "string", "description": "Echo of the read path"}
+      ],
+      "side_effects": ["filesystem.read"]
+    },
+    {
+      "action": "write",
+      "description": "Write text to a workspace file (optionally overwrite existing)",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true, "description": "Must be 'write'"},
+        {"name": "path", "type": "string", "required": true, "description": "Target file path"},
+        {"name": "content", "type": "string", "required": true, "description": "Text content to write"},
+        {"name": "overwrite", "type": "boolean", "required": false, "description": "Allow overwriting existing file"}
+      ],
+      "output_fields": [
+        {"name": "path", "type": "string", "description": "Echo of the written path"},
+        {"name": "size", "type": "integer", "description": "Number of characters written"}
+      ],
+      "side_effects": ["filesystem.write"]
+    },
+    {
+      "action": "append",
+      "description": "Append text to an existing workspace file (creates if missing); inserts a newline before appended text when the existing file has no trailing newline and the appended text does not start with one",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true, "description": "Must be 'append'"},
+        {"name": "path", "type": "string", "required": true, "description": "Target file path"},
+        {"name": "content", "type": "string", "required": true, "description": "Text content to append"}
+      ],
+      "output_fields": [
+        {"name": "path", "type": "string", "description": "Echo of the written path"},
+        {"name": "size", "type": "integer", "description": "Number of characters written"}
+      ],
+      "side_effects": ["filesystem.write"]
+    },
+    {
+      "action": "replace_line",
+      "description": "Replace exactly one line in a workspace text file by matching a line prefix",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true, "description": "Must be 'replace_line'"},
+        {"name": "path", "type": "string", "required": true, "description": "Target file path"},
+        {"name": "line_prefix", "type": "string", "required": true, "description": "Prefix that must match exactly one line"},
+        {"name": "content", "type": "string", "required": true, "description": "Replacement line content without trailing newline"}
+      ],
+      "output_fields": [
+        {"name": "path", "type": "string"},
+        {"name": "line_index", "type": "integer"},
+        {"name": "size", "type": "integer"}
+      ],
+      "side_effects": ["filesystem.read", "filesystem.write"]
+    },
+    {
+      "action": "copy",
+      "description": "Copy a file or directory inside workspace",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true, "description": "Must be 'copy'"},
+        {"name": "source", "type": "string", "required": true, "description": "Source path"},
+        {"name": "target", "type": "string", "required": true, "description": "Target path"},
+        {"name": "overwrite", "type": "boolean", "required": false, "description": "Allow overwriting existing target"}
+      ],
+      "output_fields": [
+        {"name": "source", "type": "string"},
+        {"name": "target", "type": "string"},
+        {"name": "action", "type": "string"}
+      ],
+      "side_effects": ["filesystem.read", "filesystem.write"]
+    },
+    {
+      "action": "move",
+      "description": "Move (or rename) a file or directory inside workspace",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true, "description": "Must be 'move'"},
+        {"name": "source", "type": "string", "required": true, "description": "Source path"},
+        {"name": "target", "type": "string", "required": true, "description": "Target path"},
+        {"name": "overwrite", "type": "boolean", "required": false, "description": "Allow overwriting existing target"}
+      ],
+      "output_fields": [
+        {"name": "source", "type": "string"},
+        {"name": "target", "type": "string"},
+        {"name": "action", "type": "string"}
+      ],
+      "side_effects": ["filesystem.write", "filesystem.delete"]
+    },
+    {
+      "action": "rename",
+      "description": "Rename a file or directory inside workspace (alias for move)",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true, "description": "Must be 'rename'"},
+        {"name": "source", "type": "string", "required": true, "description": "Source path"},
+        {"name": "target", "type": "string", "required": true, "description": "New path"},
+        {"name": "overwrite", "type": "boolean", "required": false, "description": "Allow overwriting existing target"}
+      ],
+      "output_fields": [
+        {"name": "source", "type": "string"},
+        {"name": "target", "type": "string"},
+        {"name": "action", "type": "string"}
+      ],
+      "side_effects": ["filesystem.write", "filesystem.delete"]
+    },
+    {
+      "action": "delete",
+      "description": "Delete a file or directory (requires allow_delete=true on the task)",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true, "description": "Must be 'delete'"},
+        {"name": "path", "type": "string", "required": true, "description": "Target path"}
+      ],
+      "output_fields": [
+        {"name": "path", "type": "string"},
+        {"name": "action", "type": "string"}
+      ],
+      "side_effects": ["filesystem.delete"]
+    }
+  ]
+}

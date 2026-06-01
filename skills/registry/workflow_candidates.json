@@ -1,0 +1,248 @@
+{
+  "updated_at": "2026-04-15T07:26:44.274044+00:00",
+  "candidates": [
+    {
+      "signature_hash": "05514dc043c58f3da299aa5566f72e07cd461299",
+      "skill_name": "generated.workflow.python-2026-city-work.05514dc0",
+      "display_name": "Workflow Candidate python-2026-city-work-05514dc0",
+      "goal": "完成这个任务用的是浏览器完成的还是python\n补充要求: 那你搜一2026年春季上海游玩攻略，我的要求是周末两天的city work，你给我出一个方案",
+      "plan_summary": "生成2026年春季上海周末两天city walk游玩攻略方案",
+      "status": "draft",
+      "version": "0.0.2",
+      "promotion_source": "system_suggestion",
+      "source_task_ids": [
+        "task_20260415_062641_5b6ada25",
+        "task_20260415_063946_d217400f",
+        "task_20260415_072445_d7e7022b"
+      ],
+      "source_workflow_ids": [
+        "task_20260415_062641_5b6ada25",
+        "task_20260415_063946_d217400f",
+        "task_20260415_072445_d7e7022b"
+      ],
+      "compiled_from_task_id": "task_20260415_072445_d7e7022b",
+      "success_count": 3,
+      "total_runs": 3,
+      "success_rate": 1.0,
+      "stability": 3.0,
+      "parameter_count": 0,
+      "parameter_ratio": 0.0,
+      "permission_requirements": [
+        "filesystem.read"
+      ],
+      "candidate_dir": "/Users/xinchenyang/ai_project/omniagent/skills/generated/python-2026-city-work_05514dc0",
+      "manifest_path": "/Users/xinchenyang/ai_project/omniagent/skills/generated/python-2026-city-work_05514dc0/skill.yaml",
+      "main_path": "/Users/xinchenyang/ai_project/omniagent/skills/generated/python-2026-city-work_05514dc0/main.py",
+      "template_path": "/Users/xinchenyang/ai_project/omniagent/skills/generated/python-2026-city-work_05514dc0/template.json",
+      "generated_at": "2026-04-15T07:26:44.273616+00:00",
+      "promotion_reason": "同结构 workflow 成功 3 次 / 共 3 次，success_rate=1.00，参数化字段 0 个",
+      "template_parameters": [],
+      "template_node_count": 1,
+      "source_relation": {
+        "kind": "workflow_compiled",
+        "compiled_from_graph_id": "graph_16cf377dcd",
+        "compiled_from_task_id": "task_20260415_072445_d7e7022b"
+      },
+      "version_history": [
+        "0.0.1"
+      ]
+    },
+    {
+      "signature_hash": "8b3e8e237b1347296bbb6cddc539917a40f9cacc",
+      "skill_name": "generated.workflow.workspace-reports-note-md-hello.8b3e8e23",
+      "display_name": "Workflow Candidate workspace-reports-note-md-hello-8b3e8e23",
+      "goal": "在 workspace/reports/ 下新建 note.md，内容是 hello",
+      "plan_summary": "在 workspace/reports/ 目录下创建 note.md 文件并写入内容 hello",
+      "status": "draft",
+      "version": "0.0.9",
+      "promotion_source": "system_suggestion",
+      "source_task_ids": [
+        "task_20260414_073204_0510e2ab",
+        "task_20260414_075051_c3f089c8",
+        "task_20260414_075506_e011aa4f",
+        "task_20260414_075901_33cfa068",
+        "task_20260414_084250_908986ea",
+        "task_20260414_084431_f0057f4c",
+        "task_20260414_090301_071416ed"
+      ],
+      "source_workflow_ids": [
+        "task_20260414_073204_0510e2ab",
+        "task_20260414_075051_c3f089c8",
+        "task_20260414_075506_e011aa4f",
+        "task_20260414_075901_33cfa068",
+        "task_20260414_084250_908986ea",
+        "task_20260414_084431_f0057f4c",
+        "task_20260414_090301_071416ed"
+      ],
+      "compiled_from_task_id": "task_20260414_090301_071416ed",
+      "success_count": 7,
+      "total_runs": 7,
+      "success_rate": 1.0,
+      "stability": 7.0,
+      "parameter_count": 3,
+      "parameter_ratio": 0.75,
+      "permission_requirements": [
+        "filesystem.read",
+        "filesystem.write"
+      ],
+      "candidate_dir": "/Users/xinchenyang/ai_project/omniagent/skills/generated/workspace-reports-note-md-hello_8b3e8e23",
+      "manifest_path": "/Users/xinchenyang/ai_project/omniagent/skills/generated/workspace-reports-note-md-hello_8b3e8e23/skill.yaml",
+      "main_path": "/Users/xinchenyang/ai_project/omniagent/skills/generated/workspace-reports-note-md-hello_8b3e8e23/main.py",
+      "template_path": "/Users/xinchenyang/ai_project/omniagent/skills/generated/workspace-reports-note-md-hello_8b3e8e23/template.json",
+      "generated_at": "2026-04-14T09:03:58.723826+00:00",
+      "promotion_reason": "同结构 workflow 成功 7 次 / 共 7 次，success_rate=1.00，参数化字段 3 个",
+      "template_parameters": [
+        {
+          "name": "node_write_note_path",
+          "node_id": "node_write_note",
+          "field_path": "path",
+          "type": "string",
+          "default": "workspace/reports/summary11.md",
+          "examples": [
+            "workspace/reports/note.md",
+            "workspace/generated/hello.tx",
+            "workspace/reports/summary.md"
+          ]
+        },
+        {
+          "name": "node_write_note_content",
+          "node_id": "node_write_note",
+          "field_path": "content",
+          "type": "string",
+          "default": "测试报告",
+          "examples": [
+            "hello",
+            "在一个宁静的小村庄里，住着一只名叫小灰的流浪猫。它每天在巷子里穿梭，寻找食物。一天，它发现了一只受伤的小鸟，便用自己的体温温暖它，并找来虫子喂它。几天后，小鸟康复了，飞向了蓝天。小灰虽然依旧孤独，但心里多了一份温暖。从此，它不再只是寻找食物，而是开始留意身边需要帮助的小生命。村庄里的人们渐渐发现了小灰的善良，开始给它留下食物和水。小灰终于有了家，也明白了给予比索取更快乐。",
+            "# 测试报告\n\n## 环境\n\n## 步骤\n\n## 结论\n"
+          ]
+        },
+        {
+          "name": "node_write_note_overwrite",
+          "node_id": "node_write_note",
+          "field_path": "overwrite",
+          "type": "boolean",
+          "default": false,
+          "examples": [
+            true,
+            true,
+            false
+          ]
+        }
+      ],
+      "template_node_count": 1,
+      "source_relation": {
+        "kind": "workflow_compiled",
+        "compiled_from_graph_id": "graph_91d614bc72",
+        "compiled_from_task_id": "task_20260414_090301_071416ed"
+      },
+      "version_history": [
+        "0.0.1",
+        "0.0.2",
+        "0.0.3",
+        "0.0.4",
+        "0.0.5",
+        "0.0.6",
+        "0.0.7",
+        "0.0.8"
+      ]
+    },
+    {
+      "signature_hash": "84533fcdbdb733fb2e075dd8704ef068a99d0d7e",
+      "skill_name": "generated.workflow.workspace-reports-summary-md.84533fcd",
+      "display_name": "Workflow Candidate workspace-reports-summary-md-84533fcd",
+      "goal": "读取 workspace/reports/summary.md 的完整内容",
+      "plan_summary": "读取 workspace/reports/summary.md 文件的完整内容",
+      "status": "draft",
+      "version": "0.0.1",
+      "promotion_source": "system_suggestion",
+      "source_task_ids": [
+        "task_20260414_080109_e3318561",
+        "task_20260414_080451_6e1e17fb"
+      ],
+      "source_workflow_ids": [
+        "task_20260414_080109_e3318561",
+        "task_20260414_080451_6e1e17fb"
+      ],
+      "compiled_from_task_id": "task_20260414_080451_6e1e17fb",
+      "success_count": 2,
+      "total_runs": 2,
+      "success_rate": 1.0,
+      "stability": 2.0,
+      "parameter_count": 0,
+      "parameter_ratio": 0.0,
+      "permission_requirements": [
+        "filesystem.read"
+      ],
+      "candidate_dir": "/Users/xinchenyang/ai_project/omniagent/skills/generated/workspace-reports-summary-md_84533fcd",
+      "manifest_path": "/Users/xinchenyang/ai_project/omniagent/skills/generated/workspace-reports-summary-md_84533fcd/skill.yaml",
+      "main_path": "/Users/xinchenyang/ai_project/omniagent/skills/generated/workspace-reports-summary-md_84533fcd/main.py",
+      "template_path": "/Users/xinchenyang/ai_project/omniagent/skills/generated/workspace-reports-summary-md_84533fcd/template.json",
+      "generated_at": "2026-04-14T08:06:08.297033+00:00",
+      "promotion_reason": "同结构 workflow 成功 2 次 / 共 2 次，success_rate=1.00，参数化字段 0 个",
+      "template_parameters": [],
+      "template_node_count": 1,
+      "source_relation": {
+        "kind": "workflow_compiled",
+        "compiled_from_graph_id": "graph_b9720d95fa",
+        "compiled_from_task_id": "task_20260414_080451_6e1e17fb"
+      },
+      "version_history": []
+    },
+    {
+      "signature_hash": "d9ee02da6b2d9504fcd0be3cdbb96a26786abfff",
+      "skill_name": "generated.workflow.memory.d9ee02da",
+      "display_name": "Workflow Candidate memory-d9ee02da",
+      "goal": "帮我看一下 MEMORY 目录里有什么",
+      "plan_summary": "列出 MEMORY 目录下的文件和子目录",
+      "status": "draft",
+      "version": "0.0.2",
+      "promotion_source": "system_suggestion",
+      "source_task_ids": [
+        "task_20260315_111259_8c3b80df",
+        "task_20260414_065226_f8f8e458"
+      ],
+      "source_workflow_ids": [
+        "task_20260315_111259_8c3b80df",
+        "task_20260414_065226_f8f8e458"
+      ],
+      "compiled_from_task_id": "task_20260414_065226_f8f8e458",
+      "success_count": 2,
+      "total_runs": 2,
+      "success_rate": 1.0,
+      "stability": 2.0,
+      "parameter_count": 1,
+      "parameter_ratio": 0.333,
+      "permission_requirements": [
+        "filesystem.read"
+      ],
+      "candidate_dir": "/Users/xinchenyang/ai_project/omniagent/skills/generated/memory_d9ee02da",
+      "manifest_path": "/Users/xinchenyang/ai_project/omniagent/skills/generated/memory_d9ee02da/skill.yaml",
+      "main_path": "/Users/xinchenyang/ai_project/omniagent/skills/generated/memory_d9ee02da/main.py",
+      "template_path": "/Users/xinchenyang/ai_project/omniagent/skills/generated/memory_d9ee02da/template.json",
+      "generated_at": "2026-04-14T06:53:13.378889+00:00",
+      "promotion_reason": "同结构 workflow 成功 2 次 / 共 2 次，success_rate=1.00，参数化字段 1 个",
+      "template_parameters": [
+        {
+          "name": "node_list_memory_path",
+          "node_id": "node_list_memory",
+          "field_path": "path",
+          "type": "string",
+          "default": "~/Downloads",
+          "examples": [
+            "MEMORY",
+            "~/Downloads"
+          ]
+        }
+      ],
+      "template_node_count": 1,
+      "source_relation": {
+        "kind": "workflow_compiled",
+        "compiled_from_graph_id": "graph_107e7126ff",
+        "compiled_from_task_id": "task_20260414_065226_f8f8e458"
+      },
+      "version_history": [
+        "0.0.1"
+      ]
+    }
+  ]
+}

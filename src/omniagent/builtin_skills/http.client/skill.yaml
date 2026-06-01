@@ -1,0 +1,108 @@
+{
+  "name": "builtin.http.client",
+  "version": "0.1.0",
+  "description": "Small stdlib HTTP client with explicit network permission checks.",
+  "input_schema": {"action": "string", "url": "string", "headers": "object", "params": "object", "json": "any", "json_body": "any", "form": "object", "raw_body": "string", "body": "string", "auth": "object", "timeout": "number", "max_response_chars": "integer"},
+  "output_schema": {"method": "string", "url": "string", "request_url": "string", "status": "integer", "reason": "string", "headers": "object", "body": "string", "body_preview": "string", "body_truncated": "boolean", "body_size": "integer", "json": "any"},
+  "permission_requirements": ["network"],
+  "dependency_requirements": [],
+  "side_effects": ["network_read", "network_write"],
+  "sandbox_level": "workspace",
+  "tags": ["http", "api", "network", "builtin"],
+  "contracts": [
+    {
+      "action": "get",
+      "description": "Send an HTTP GET request",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "url", "type": "string", "required": true},
+        {"name": "headers", "type": "object", "required": false},
+        {"name": "params", "type": "object", "required": false},
+        {"name": "auth", "type": "object", "required": false},
+        {"name": "timeout", "type": "number", "required": false},
+        {"name": "max_response_chars", "type": "integer", "required": false}
+      ],
+      "output_fields": [
+        {"name": "status", "type": "integer"},
+        {"name": "headers", "type": "object"},
+        {"name": "body_preview", "type": "string"},
+        {"name": "body_truncated", "type": "boolean"},
+        {"name": "json", "type": "any"}
+      ],
+      "side_effects": ["network_read"]
+    },
+    {
+      "action": "post",
+      "description": "Send an HTTP POST request with optional JSON, form, or raw body",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "url", "type": "string", "required": true},
+        {"name": "headers", "type": "object", "required": false},
+        {"name": "params", "type": "object", "required": false},
+        {"name": "json", "type": "any", "required": false},
+        {"name": "json_body", "type": "any", "required": false},
+        {"name": "form", "type": "object", "required": false},
+        {"name": "raw_body", "type": "string", "required": false},
+        {"name": "body", "type": "string", "required": false},
+        {"name": "auth", "type": "object", "required": false},
+        {"name": "timeout", "type": "number", "required": false},
+        {"name": "max_response_chars", "type": "integer", "required": false}
+      ],
+      "output_fields": [
+        {"name": "status", "type": "integer"},
+        {"name": "headers", "type": "object"},
+        {"name": "body_preview", "type": "string"},
+        {"name": "body_truncated", "type": "boolean"},
+        {"name": "json", "type": "any"}
+      ],
+      "side_effects": ["network_read", "network_write"]
+    },
+    {
+      "action": "put",
+      "description": "Send an HTTP PUT request with optional JSON, form, or raw body",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "url", "type": "string", "required": true},
+        {"name": "headers", "type": "object", "required": false},
+        {"name": "params", "type": "object", "required": false},
+        {"name": "json", "type": "any", "required": false},
+        {"name": "json_body", "type": "any", "required": false},
+        {"name": "form", "type": "object", "required": false},
+        {"name": "raw_body", "type": "string", "required": false},
+        {"name": "body", "type": "string", "required": false},
+        {"name": "auth", "type": "object", "required": false},
+        {"name": "timeout", "type": "number", "required": false},
+        {"name": "max_response_chars", "type": "integer", "required": false}
+      ],
+      "output_fields": [
+        {"name": "status", "type": "integer"},
+        {"name": "headers", "type": "object"},
+        {"name": "body_preview", "type": "string"},
+        {"name": "body_truncated", "type": "boolean"},
+        {"name": "json", "type": "any"}
+      ],
+      "side_effects": ["network_read", "network_write"]
+    },
+    {
+      "action": "delete",
+      "description": "Send an HTTP DELETE request",
+      "input_fields": [
+        {"name": "action", "type": "string", "required": true},
+        {"name": "url", "type": "string", "required": true},
+        {"name": "headers", "type": "object", "required": false},
+        {"name": "params", "type": "object", "required": false},
+        {"name": "auth", "type": "object", "required": false},
+        {"name": "timeout", "type": "number", "required": false},
+        {"name": "max_response_chars", "type": "integer", "required": false}
+      ],
+      "output_fields": [
+        {"name": "status", "type": "integer"},
+        {"name": "headers", "type": "object"},
+        {"name": "body_preview", "type": "string"},
+        {"name": "body_truncated", "type": "boolean"},
+        {"name": "json", "type": "any"}
+      ],
+      "side_effects": ["network_read", "network_write"]
+    }
+  ]
+}

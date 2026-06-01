@@ -1,0 +1,28 @@
+{
+  "name": "builtin.browser.basic",
+  "version": "0.2.0",
+  "description": "Fetch a page or local file via browser-style executor.",
+  "input_schema": {"url": "string"},
+  "output_schema": {"body": "string"},
+  "permission_requirements": ["network"],
+  "dependency_requirements": [],
+  "side_effects": ["network_read"],
+  "sandbox_level": "workspace",
+  "tags": ["browser", "builtin"],
+  "contracts": [
+    {
+      "action": "fetch",
+      "description": "Fetch a URL or local file and return its body",
+      "input_fields": [
+        {"name": "url", "type": "string", "required": true, "description": "Target URL or file:// path"}
+      ],
+      "output_fields": [
+        {"name": "url", "type": "string", "description": "Echo of the fetched URL"},
+        {"name": "status", "type": "integer", "description": "HTTP status code (or 0 for local file)"},
+        {"name": "body", "type": "string", "description": "Response body"},
+        {"name": "source", "type": "string", "description": "Backend identifier (e.g. stdlib / local)"}
+      ],
+      "side_effects": ["network_read"]
+    }
+  ]
+}
