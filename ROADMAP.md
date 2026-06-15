@@ -35,10 +35,11 @@ Last reviewed: 2026-06-13
 | Phase 3 | Procedure memory | implemented | 可从 experience 提炼 `ProcedureDraft`；相似任务在 Planner 前写 match decision artifact；CLI 可 list / show / edit / review / disable / explain-match |
 | Phase 4 | Habit fast path | implemented | verified procedure 满足 3 次成功、无近期失败后可升级 habit；低风险 habit 可成为 policy fast path candidate；artifact 记录 habit id、skipped stages、validator evidence 和 policy gate |
 | Phase 5 | Skill promotion | implemented | `skill promote-habit` 可从稳定 habit 生成、验证并激活低风险 skill；skill 带 contract、权限边界、测试和 experience -> procedure -> habit -> skill lineage |
+| Phase 6 | Learning feedback | implementing | 任务结束回复展示 experience、procedure / habit 命中、复用判断、review / edit / disable 入口和下一次复用预期 |
 
 ## Immediate Next Work
 
-当前 roadmap 的 Phase 0-5 MVP 主线已实现；跨 eval evidence index 已具备查询、报告视图和 dashboard/runbook 模板。下一步进入收口验证和增强：
+当前 roadmap 的 Phase 0-5 MVP 主线已实现；跨 eval evidence index 已具备查询、报告视图和 dashboard/runbook 模板。当前增强重点是 learning feedback：让任务结束回复直接说明“这次学到了什么、是否会复用、还需要我做什么”。下一步进入收口验证和增强：
 
 1. 按真实稳定 habit 继续扩展更多 skill promotion 类型；file（含 replace_line / copy）、JSON / JSONL data（含 jsonl / ndjson alias 和 report_lines）、CSV / TSV data、SQLite data、config（含 YAML / TOML / XML / dotenv / INI / properties alias）、plain text、markdown、HTML、archive（含 zip / tar / gztar / tgz / tar.gz alias）和 datetime 已作为低风险自动激活类型支持；active 低风险 `generated.habit.*` 显式 payload 已可在 contract / permission / side-effect gate 下 direct execute；read-only Git 和 safe shell 已作为 process-backed 手动审批类型支持，Python 已作为 code-execution-backed 手动审批类型支持，HTTP 和 browser fetch 已作为 network-backed 手动审批类型支持，并保持高风险审批 gate。
 2. 继续扩展学习治理到更多对象级别的操作入口；统一只读审计、对象详情、历史事件和匹配解释视图已覆盖 experience / procedure / habit / skill 与 procedure / habit retrieval，统一 edit / promote / validate / decay / request-changes 入口已覆盖 procedure / habit，统一 validate 入口已覆盖 skill，统一 rollback 入口已覆盖 skill，统一 approve / reject / disable / enable 入口已覆盖 procedure / habit / skill。
@@ -48,6 +49,7 @@ Phase 1、Phase 2、Phase 3、Phase 4 和 Phase 5 已完成；learning-loop 真�
 
 - [`docs/specs/procedure-memory.md`](./docs/specs/procedure-memory.md)
 - [`docs/specs/skill-promotion.md`](./docs/specs/skill-promotion.md)
+- [`docs/specs/learning-feedback.md`](./docs/specs/learning-feedback.md)
 
 ## Migration Inputs
 

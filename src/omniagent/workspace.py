@@ -316,6 +316,9 @@ class TaskArtifactManager:
     def write_habit_fast_path(self, task_dir: Path, decision: dict[str, Any]) -> None:
         _write_json(task_dir / "procedure" / "habit_fast_path.json", decision)
 
+    def write_learning_feedback(self, task_dir: Path, feedback: dict[str, Any]) -> None:
+        _write_json(task_dir / "learning" / "feedback.json", feedback)
+
     def write_llm_call(
         self, task_dir: Path, response: LLMResponse, *, request_payload: dict[str, Any]
     ) -> None:

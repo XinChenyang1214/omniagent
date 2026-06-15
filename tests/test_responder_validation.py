@@ -392,6 +392,42 @@ class ResponderIntegrationTest(unittest.TestCase):
         self.assertFalse(task_summary["completion_evaluation"]["task_satisfied"])
         self.assertEqual(task_summary["completion_evaluation"]["missing_requirements"], ["实时天气"])
 
+    def test_learning_feedback_injected_and_appended_to_reply(self) -> None:
+        self._set_llm_reply("任务已完成")
+        report = _make_report(
+            task_goal="维护每日反馈审计记录",
+            success=True,
+            node_goals=["写入反馈审计记录"],
+        )
+        report.learning_feedback = {
+            "schema_version": "learning-feedback/v1",
+            "summary_lines": [
+                "经验记录：已写入 exp_1，validation=passed，可作为学习输入。",
+                "Procedure：已生成 draft proc_1，需要 review。",
+                "复用判断：本次任务生成了新的 procedure draft。",
+                "需要你做：新 procedure draft 需要用户审核；审核前不会自动复用。",
+            ],
+            "review": {
+                "commands": [
+                    "omniagent procedure review proc_1 --decision approved --evidence-ref tasks/t_test/completion/evaluation.json"
+                ]
+            },
+        }
+        ctx = _make_context(user_message="维护每日反馈审计记录", report=report)
+
+        result = self.generator.generate(context=ctx)
+
+        call_kwargs = self.llm.generate_structured.call_args
+        payload = call_kwargs.kwargs.get("request_payload") or call_kwargs[1].get("request_payload")
+        self.assertEqual(
+            payload["task_summary"]["learning_feedback"]["schema_version"],
+            "learning-feedback/v1",
+        )
+        self.assertIn("任务已完成", result)
+        self.assertIn("学习反馈:", result)
+        self.assertIn("经验记录：已写入 exp_1", result)
+        self.assertIn("omniagent procedure review proc_1", result)
+
 
 if __name__ == "__main__":
     unittest.main()

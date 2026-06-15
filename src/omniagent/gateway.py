@@ -28,6 +28,8 @@ from omniagent.learning_governance import (
     build_learning_history,
     build_learning_match_explanation,
     build_learning_review,
+    build_task_learning_feedback,
+    format_learning_feedback,
 )
 from omniagent.llm import build_llm_adapter
 from omniagent.memory import FileMemoryManager
@@ -224,6 +226,7 @@ class RuntimeGateway:
             loaded_skills=loaded_skills,
             skill_registry_entries=skill_registry_entries,
         )
+        self._attach_learning_feedback(report)
         self._ensure_task_thread(request, report)
         return report
 
@@ -237,13 +240,15 @@ class RuntimeGateway:
         # META-006: same as submit — fresh cache per resume invocation.
         self.hybrid_memory.begin_turn(f"resume:{task_id}:{utc_now()}")
         event_bus, loaded_skills, skill_registry_entries = self._prepare_runtime(event_handlers)
-        return self.runtime.resume(
+        report = self.runtime.resume(
             task_id,
             event_bus,
             loaded_skills=loaded_skills,
             skill_registry_entries=skill_registry_entries,
             request_overrides=request_overrides,
         )
+        self._attach_learning_feedback(report)
+        return report
 
     def create_thread(self, *, title: str | None = None) -> ConversationThread:
         thread = ConversationThread(title=title or "CLI chat session")
@@ -516,6 +521,32 @@ class RuntimeGateway:
             object_type=object_type,
             status=status,
         )
+
+    def _attach_learning_feedback(self, report: TaskExecutionReport) -> None:
+        task_dir = self.artifact_manager.task_dir(report.task.task_id)
+
+        def load_json(path: Path) -> dict[str, Any]:
+            if not path.exists():
+                return {}
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                return {}
+            return payload if isinstance(payload, dict) else {}
+
+        feedback = build_task_learning_feedback(
+            task_id=report.task.task_id,
+            task_goal=report.task.goal,
+            experience=load_json(task_dir / "experience" / "experience_record.json"),
+            procedure_match=load_json(task_dir / "procedure" / "procedure_match.json"),
+            habit_fast_path=load_json(task_dir / "procedure" / "habit_fast_path.json"),
+            procedures=self.procedure_memory.list(include_disabled=True),
+        )
+        report.learning_feedback = feedback
+        try:
+            self.artifact_manager.write_learning_feedback(task_dir, feedback)
+        except Exception:  # noqa: BLE001
+            pass
 
     def show_learning_object(
         self,
@@ -3055,6 +3086,9 @@ class RuntimeGateway:
                 )
         if checkpoint is not None:
             message += f"\ncheckpoint_id: {checkpoint.checkpoint_id}\ncheckpoint_prompt: {checkpoint.prompt}"
+        learning_feedback = format_learning_feedback(task_report.learning_feedback)
+        if learning_feedback:
+            message += f"\n\n{learning_feedback}"
         return message
 
     def _record_thread_binding(

@@ -110,6 +110,19 @@ class ProcedureMemoryStoreTest(unittest.TestCase):
         self.assertEqual(match["suggestion_mode"], "suggest_only")
         self.assertTrue(match["required_confirmation"])
 
+    def test_unrelated_report_task_does_not_match_existing_procedure(self) -> None:
+        draft = self.store.extract_draft_from_experience(
+            _passed_experience(user_goal="alpha_status_ledger write reports/alpha-status.md")
+        )
+        assert draft is not None
+
+        match = self.store.explain_match(
+            "beta_decision_register write reports/beta-decisions.md"
+        )
+
+        self.assertFalse(match["matched"])
+        self.assertEqual(match["suggestion_mode"], "fallback_to_planner")
+
     def test_validator_failure_downgrades_verified_procedure(self) -> None:
         draft = self.store.extract_draft_from_experience(_passed_experience())
         assert draft is not None

@@ -644,7 +644,7 @@ class ProcedureMemoryStore:
         task_goal: str,
         *,
         agent_state_summary: dict[str, Any] | None = None,
-        threshold: float = 0.2,
+        threshold: float = 0.6,
     ) -> dict[str, Any]:
         self.ensure()
         agent_state_summary = dict(agent_state_summary or {})

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from omniagent.models import utc_now
@@ -8,6 +9,7 @@ from omniagent.models import utc_now
 LEARNING_REVIEW_SCHEMA_VERSION = "learning-review/v1"
 LEARNING_HISTORY_SCHEMA_VERSION = "learning-history/v1"
 LEARNING_MATCH_EXPLANATION_SCHEMA_VERSION = "learning-match-explanation/v1"
+LEARNING_FEEDBACK_SCHEMA_VERSION = "learning-feedback/v1"
 
 
 def build_learning_review(
@@ -138,6 +140,379 @@ def build_learning_match_explanation(
             "suggestion_mode": match.get("suggestion_mode"),
         },
     }
+
+
+def build_task_learning_feedback(
+    *,
+    task_id: str,
+    task_goal: str,
+    experience: dict[str, Any] | None = None,
+    procedure_match: dict[str, Any] | None = None,
+    habit_fast_path: dict[str, Any] | None = None,
+    procedures: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build user-facing feedback from task learning artifacts.
+
+    This is a derived view: it does not change learning state. The intent is to
+    make the existing experience/procedure/habit loop visible at task end.
+    """
+    experience = dict(experience or {})
+    procedure_match = dict(procedure_match or {})
+    habit_fast_path = dict(habit_fast_path or {})
+    procedures = list(procedures or [])
+    procedures_by_id = {
+        str(procedure.get("procedure_id") or ""): procedure
+        for procedure in procedures
+        if procedure.get("procedure_id")
+    }
+
+    validation = experience.get("validation") if isinstance(experience.get("validation"), dict) else {}
+    validation_verdict = str(validation.get("verdict") or "missing")
+    evidence_refs = [str(item) for item in list(validation.get("evidence_refs") or [])]
+    learning_candidates = [
+        item for item in list(experience.get("learning_candidates") or []) if isinstance(item, dict)
+    ]
+    learnable = (
+        bool(experience)
+        and experience.get("status") == "succeeded"
+        and validation_verdict == "passed"
+        and bool(evidence_refs)
+    )
+
+    matched_id = str(procedure_match.get("matched_procedure_id") or "")
+    matched_procedure = procedures_by_id.get(matched_id)
+    generated_procedures = [
+        procedure
+        for procedure in procedures
+        if task_id in {str(item) for item in list(procedure.get("source_task_ids") or [])}
+        and str(procedure.get("procedure_id") or "") != matched_id
+    ]
+    generated_procedure = generated_procedures[0] if generated_procedures else None
+
+    matched_item = _procedure_or_habit_item(matched_procedure)
+    generated_item = _procedure_or_habit_item(generated_procedure)
+
+    reuse = _build_reuse_feedback(
+        learnable=learnable,
+        validation_verdict=validation_verdict,
+        procedure_match=procedure_match,
+        habit_fast_path=habit_fast_path,
+        matched_procedure=matched_procedure,
+        generated_procedure=generated_procedure,
+    )
+    review = _build_review_feedback(
+        task_goal=task_goal,
+        experience_id=str(experience.get("experience_id") or ""),
+        generated_procedure=generated_procedure,
+        matched_procedure=matched_procedure,
+        learnable=learnable,
+    )
+    summary_lines = _learning_feedback_summary_lines(
+        experience=experience,
+        learnable=learnable,
+        validation_verdict=validation_verdict,
+        procedure_match=procedure_match,
+        habit_fast_path=habit_fast_path,
+        matched_procedure=matched_procedure,
+        generated_procedure=generated_procedure,
+        reuse=reuse,
+        review=review,
+    )
+
+    return {
+        "schema_version": LEARNING_FEEDBACK_SCHEMA_VERSION,
+        "generated_at": utc_now(),
+        "task_id": task_id,
+        "task_goal": task_goal,
+        "experience": {
+            "record_written": bool(experience),
+            "experience_id": experience.get("experience_id"),
+            "status": experience.get("status"),
+            "validation_verdict": validation_verdict,
+            "validation_method": validation.get("method"),
+            "evidence_refs": evidence_refs,
+            "learnable": learnable,
+            "learning_candidate_count": len(learning_candidates),
+            "reason": _experience_feedback_reason(
+                has_experience=bool(experience),
+                learnable=learnable,
+                validation_verdict=validation_verdict,
+                evidence_refs=evidence_refs,
+            ),
+        },
+        "procedure": {
+            "matched": bool(procedure_match.get("matched")),
+            "matched_id": matched_id or None,
+            "matched_status": matched_procedure.get("status") if matched_procedure else None,
+            "matched_object_type": matched_item.get("object_type") if matched_item else None,
+            "suggestion_mode": procedure_match.get("suggestion_mode"),
+            "match_reason": procedure_match.get("reason"),
+            "required_confirmation": bool(procedure_match.get("required_confirmation", False)),
+            "generated_draft_id": generated_procedure.get("procedure_id")
+            if generated_procedure
+            else None,
+            "generated_status": generated_procedure.get("status") if generated_procedure else None,
+            "generated_review_status": generated_item.get("review_status")
+            if generated_item
+            else None,
+            "success_count": matched_procedure.get("success_count")
+            if matched_procedure
+            else generated_procedure.get("success_count")
+            if generated_procedure
+            else None,
+        },
+        "habit_fast_path": {
+            "decision": habit_fast_path.get("decision"),
+            "habit_id": habit_fast_path.get("habit_id"),
+            "skipped_stages": list(habit_fast_path.get("skipped_stages") or []),
+            "policy_gate": habit_fast_path.get("policy_gate") or {},
+            "reason": habit_fast_path.get("reason"),
+        },
+        "reuse": reuse,
+        "review": review,
+        "summary_lines": summary_lines,
+    }
+
+
+def format_learning_feedback(feedback: dict[str, Any] | None) -> str:
+    if not feedback:
+        return ""
+    lines = [str(item) for item in list(feedback.get("summary_lines") or []) if str(item)]
+    review = feedback.get("review") if isinstance(feedback.get("review"), dict) else {}
+    commands = [str(item) for item in list(review.get("commands") or []) if str(item)]
+    if not lines and not commands:
+        return ""
+    output = ["学习反馈:"]
+    output.extend(f"- {line}" for line in lines)
+    if commands:
+        output.append("- 你可以执行:")
+        output.extend(f"  - {command}" for command in commands[:5])
+    return "\n".join(output)
+
+
+def _build_reuse_feedback(
+    *,
+    learnable: bool,
+    validation_verdict: str,
+    procedure_match: dict[str, Any],
+    habit_fast_path: dict[str, Any],
+    matched_procedure: dict[str, Any] | None,
+    generated_procedure: dict[str, Any] | None,
+) -> dict[str, Any]:
+    policy_gate = (
+        habit_fast_path.get("policy_gate") if isinstance(habit_fast_path.get("policy_gate"), dict) else {}
+    )
+    if habit_fast_path.get("decision") == "habit_fast_path_candidate":
+        accepted = policy_gate.get("result") == "accepted"
+        return {
+            "status": "habit_fast_path" if accepted else "habit_candidate_blocked",
+            "reusable_now": bool(accepted),
+            "why": "命中低风险 habit，且 policy gate 已接受 fast path。"
+            if accepted
+            else "命中 habit，但 policy gate 未接受 fast path。",
+            "next_time": "下一次类似任务可继续复用该 habit，并在权限、contract 和风险 gate 后跳过 Planner。"
+            if accepted
+            else "下一次类似任务仍会保留 Planner 或确认路径，直到 gate 满足。",
+        }
+
+    if matched_procedure is not None:
+        status = str(matched_procedure.get("status") or "draft")
+        success_count = int(matched_procedure.get("success_count", 0) or 0)
+        if status == "verified":
+            remaining = max(0, 3 - success_count)
+            return {
+                "status": "verified_procedure_reuse",
+                "reusable_now": True,
+                "why": "命中已验证 procedure，本次验证成功会回写到原 procedure。"
+                if learnable
+                else "命中已验证 procedure，但本次没有 passed validation，不能作为正向升级证据。",
+                "next_time": "下一次类似任务可继续优先使用该 procedure；再积累 "
+                f"{remaining} 次成功后可升级为 habit。"
+                if remaining
+                else "该 procedure 已满足 habit 成功次数门槛，可进入 habit promotion。",
+            }
+        if status == "habit":
+            return {
+                "status": "habit_requires_planner_or_confirmation",
+                "reusable_now": False,
+                "why": "命中 habit，但当前风险、确认或 policy gate 未允许 fast path。",
+                "next_time": "下一次类似任务会继续解释命中原因，并在满足 gate 后进入 fast path。",
+            }
+        return {
+            "status": "draft_suggestion",
+            "reusable_now": False,
+            "why": "只命中 draft procedure；draft 只能建议，不能自动复用。",
+            "next_time": "用户 review 并提供 evidence 后，类似任务才能优先复用该 procedure。",
+        }
+
+    if generated_procedure is not None:
+        return {
+            "status": "new_draft_needs_review",
+            "reusable_now": False,
+            "why": "本次任务生成了新的 procedure draft，但 draft 需要用户 review 后才能复用。",
+            "next_time": "审核通过后，下一次类似任务可命中 verified procedure；累计 3 次验证成功后可升级 habit。",
+        }
+
+    if not learnable:
+        return {
+            "status": "not_learnable",
+            "reusable_now": False,
+            "why": "本次任务没有可升级的 passed validation evidence。"
+            if validation_verdict != "passed"
+            else "本次任务缺少可用于升级的 evidence refs。",
+            "next_time": "下一次需要通过 completion / validator 并保留 evidence 后，才会形成可复用学习结果。",
+        }
+
+    if not procedure_match.get("matched"):
+        return {
+            "status": "learnable_no_procedure",
+            "reusable_now": False,
+            "why": "本次任务有可学习经验，但尚未形成可复用 procedure。",
+            "next_time": "学习引擎需要从该 experience 提炼 draft，并经 review 后才能复用。",
+        }
+    return {
+        "status": "unknown",
+        "reusable_now": False,
+        "why": "学习状态无法从现有 artifacts 完整判断。",
+        "next_time": "请查看 learning show/history/explain-match 进一步确认。",
+    }
+
+
+def _build_review_feedback(
+    *,
+    task_goal: str,
+    experience_id: str,
+    generated_procedure: dict[str, Any] | None,
+    matched_procedure: dict[str, Any] | None,
+    learnable: bool,
+) -> dict[str, Any]:
+    commands: list[str] = []
+    if experience_id:
+        commands.append(f"omniagent learning show --type experience {experience_id}")
+
+    target = generated_procedure or matched_procedure
+    procedure_id = str((target or {}).get("procedure_id") or "")
+    target_status = str((target or {}).get("status") or "")
+    required = False
+    reason = "无需立即处理；可以按需查看本次学习记录。"
+    if generated_procedure is not None:
+        required = True
+        reason = "新 procedure draft 需要用户审核；审核前不会自动复用。"
+        evidence_ref = _first_validator_evidence(generated_procedure)
+        if evidence_ref:
+            commands.append(
+                "omniagent procedure review "
+                f"{procedure_id} --decision approved --evidence-ref {evidence_ref}"
+            )
+    elif target_status == "draft":
+        required = True
+        reason = "命中的是 draft procedure，需要修正或审核后才能复用。"
+    elif not learnable:
+        reason = "本次没有 passed validation evidence，不会升级学习结果。"
+    elif target_status in {"verified", "habit"}:
+        reason = "已命中可治理的学习对象；如果结果不合适，可以修正或禁用。"
+
+    if procedure_id:
+        commands.extend(
+            [
+                f"omniagent learning show --type {'habit' if target_status == 'habit' else 'procedure'} {procedure_id}",
+                f"omniagent learning history --type {'habit' if target_status == 'habit' else 'procedure'} {procedure_id}",
+                f"omniagent learning explain-match {json.dumps(task_goal, ensure_ascii=False)}",
+                f"omniagent learning edit --type {'habit' if target_status == 'habit' else 'procedure'} {procedure_id} --patch '{{...}}'",
+                f"omniagent learning disable --type {'habit' if target_status == 'habit' else 'procedure'} {procedure_id}",
+            ]
+        )
+    else:
+        commands.append(f"omniagent learning explain-match {json.dumps(task_goal, ensure_ascii=False)}")
+
+    return {
+        "required": required,
+        "reason": reason,
+        "target_type": "habit"
+        if target_status == "habit"
+        else "procedure"
+        if procedure_id
+        else "experience",
+        "target_id": procedure_id or experience_id or None,
+        "commands": _dedupe(commands),
+    }
+
+
+def _learning_feedback_summary_lines(
+    *,
+    experience: dict[str, Any],
+    learnable: bool,
+    validation_verdict: str,
+    procedure_match: dict[str, Any],
+    habit_fast_path: dict[str, Any],
+    matched_procedure: dict[str, Any] | None,
+    generated_procedure: dict[str, Any] | None,
+    reuse: dict[str, Any],
+    review: dict[str, Any],
+) -> list[str]:
+    lines = [
+        "经验记录："
+        + (
+            f"已写入 {experience.get('experience_id')}，validation={validation_verdict}，"
+            + ("可作为学习输入。" if learnable else "不会用于自动升级。")
+            if experience
+            else "未找到 experience record。"
+        )
+    ]
+    if generated_procedure is not None:
+        lines.append(
+            "Procedure：本次未命中可复用 procedure，已生成 draft "
+            f"{generated_procedure.get('procedure_id')}，需要 review。"
+        )
+    elif matched_procedure is not None:
+        status = str(matched_procedure.get("status") or "draft")
+        object_type = "habit" if status == "habit" else "procedure"
+        lines.append(
+            f"Procedure：命中 {object_type} {matched_procedure.get('procedure_id')}，"
+            f"mode={procedure_match.get('suggestion_mode')}，原因：{procedure_match.get('reason') or '未记录'}。"
+        )
+    else:
+        lines.append(
+            "Procedure：未命中已有 procedure / habit。"
+            if not procedure_match.get("matched")
+            else "Procedure：命中记录不完整，请查看 procedure_match artifact。"
+        )
+
+    if habit_fast_path.get("decision") == "habit_fast_path_candidate":
+        gate = habit_fast_path.get("policy_gate") if isinstance(habit_fast_path.get("policy_gate"), dict) else {}
+        lines.append(
+            "复用判断：habit fast path "
+            f"{gate.get('result') or 'unknown'}，skipped_stages="
+            f"{','.join(str(item) for item in habit_fast_path.get('skipped_stages', [])) or 'none'}。"
+        )
+    else:
+        lines.append(f"复用判断：{reuse.get('why')} {reuse.get('next_time')}")
+    lines.append(f"需要你做：{review.get('reason')}")
+    return lines
+
+
+def _experience_feedback_reason(
+    *,
+    has_experience: bool,
+    learnable: bool,
+    validation_verdict: str,
+    evidence_refs: list[str],
+) -> str:
+    if not has_experience:
+        return "task did not produce an experience record"
+    if learnable:
+        return "succeeded with passed validation evidence"
+    if validation_verdict != "passed":
+        return f"validation verdict is {validation_verdict}"
+    if not evidence_refs:
+        return "validation evidence refs are missing"
+    return "experience is not eligible for learning promotion"
+
+
+def _first_validator_evidence(procedure: dict[str, Any]) -> str:
+    validator = procedure.get("validator") if isinstance(procedure.get("validator"), dict) else {}
+    evidence_refs = [str(item) for item in list(validator.get("required_evidence") or [])]
+    return evidence_refs[0] if evidence_refs else ""
 
 
 def _experience_history_events(record: dict[str, Any]) -> list[dict[str, Any]]:

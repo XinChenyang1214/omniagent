@@ -11,6 +11,7 @@ from omniagent.config import AppConfig
 from omniagent.errors import OmniAgentError
 from omniagent.events import TaskEvent
 from omniagent.gateway import RuntimeGateway
+from omniagent.learning_governance import format_learning_feedback
 from omniagent.logging_utils import configure_logging
 from omniagent.models import (
     AutonomyMode,
@@ -1006,6 +1007,9 @@ def main(argv: list[str] | None = None) -> int:
             print("events:")
             for event in report.events:
                 print(f"- {event.event_type} [{event.status}]")
+            learning_feedback = format_learning_feedback(report.learning_feedback)
+            if learning_feedback:
+                print(learning_feedback)
         return (
             0
             if report.result.success

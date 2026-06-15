@@ -33,6 +33,7 @@ Last reviewed：2026-06-12
 | `docs/specs/experience-record.md` | spec | `META-010` / Experience records | confirmed | implemented | 任务经验记录的 schema、写入时机、evidence 和 promotion gate 边界 | none |
 | `docs/specs/procedure-memory.md` | spec | `META-010` / Procedure memory | confirmed | implemented | procedure / verified procedure / habit 的生命周期、存储、检索、升级规则和 Phase 4 habit fast path；skill promotion 归 Phase 5 | none |
 | `docs/specs/skill-promotion.md` | spec | `META-010` / Skill promotion | confirmed | implemented | stable habit -> skill promotion 的 gate、lineage、contract、权限和验证规则 | none |
+| `docs/specs/learning-feedback.md` | spec | `META-010` / Learning feedback | confirmed | implementing | 任务结束后向用户展示 experience / procedure / habit 学习状态、复用判断和治理入口的最小输出契约 | none |
 | `AGENTS.md` | operations / project rules | agent collaboration | active | not_applicable | 项目规则、常用命令、安全边界、权威文档顺序 | none |
 | `ARCHITECTURE.md` | current-state / architecture | legacy core runtime | active | implemented_unverified | 旧实现架构和迁移输入；不再作为目标产品架构 | `docs/product-architecture.md` for target architecture |
 | `CONFIGURATION.md` | spec / operations | runtime configuration | active | implemented_unverified | 配置文件、环境变量、provider、权限和沙箱选项 | none |
@@ -78,6 +79,7 @@ Last reviewed：2026-06-12
 - `ARCHITECTURE.md` 保留为旧实现 current-state / migration input；目标产品架构以 `docs/product-architecture.md` 为准。
 - 2026-06-12 已补齐 `META-010` Phase 1-5 specs：Agent state、Experience records、Procedure memory、Skill promotion。
 - 2026-06-12 已实现 Phase 1 Agent state、Phase 2 Experience records、Phase 3 Procedure memory、Phase 4 Habit fast path 和 Phase 5 Skill promotion；下一步进入 learning-loop 真实评测与治理增强。
+- 2026-06-15 新增 Learning feedback spec，用于把已有学习闭环状态呈现在 task-ending reply 中，提高用户可感知性。
 
 ## 待确认治理项
 

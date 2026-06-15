@@ -152,7 +152,8 @@ Review record 必须写入 `reviews[]` 和 `audit_notes[]`，并更新 `review_s
 2. 过滤 `disabled` / `deprecated`。
 3. 检查 `trigger.required_context` 是否满足。
 4. 检查权限和风险。
-5. 输出 match decision artifact：
+5. 默认 trigger similarity threshold 使用 `0.6`，避免不同重复任务只因共享通用词或 `reports/*` 路径而误命中；低于阈值必须进入 rejected candidates。
+6. 输出 match decision artifact：
    - matched procedure id
    - confidence
    - reason
@@ -237,6 +238,7 @@ omniagent learning rollback --type skill <skill_name> [--to-version <version>]
 | draft 提炼必须发生在验证之后 | `tests/test_procedure_memory.py::ProcedureMemoryStoreTest::test_extract_draft_requires_passed_validation_with_evidence`；`not_verified` / `partial` / `failed` 或缺少 evidence 的 experience 不会生成 draft | implemented |
 | 无 evidence 的 draft 不能 verified | `tests/test_procedure_memory.py::ProcedureMemoryStoreTest::test_draft_without_evidence_cannot_be_verified`；promotion 被拒绝 | implemented |
 | 相似任务可命中 procedure | `tests/test_procedure_memory.py::ProcedureMemoryRuntimeIntegrationTest::test_runtime_writes_procedure_match_artifact_before_planner`；match decision artifact 记录原因 | implemented |
+| 不相关重复任务不能因通用词误命中 | `tests/test_procedure_memory.py::ProcedureMemoryStoreTest::test_unrelated_report_task_does_not_match_existing_procedure`；低于默认阈值的候选进入 rejected candidates | implemented |
 | 命中已有 verified procedure 后会累计验证成功而不是生成重复 draft | `tests/test_procedure_memory.py::ProcedureMemoryStoreTest::test_validator_success_increments_verified_procedure_with_lineage` 和 `tests/test_procedure_memory.py::ProcedureMemoryRuntimeIntegrationTest::test_runtime_updates_matched_verified_procedure_instead_of_new_draft`；success_count、source experience / task lineage 和 validator evidence 回写到原 procedure | implemented |
 | validator 失败会降级或禁用 | `tests/test_procedure_memory.py::ProcedureMemoryStoreTest::test_validator_failure_downgrades_verified_procedure` 和 `test_consecutive_validator_failures_disable_procedure`；failure_count 和 status 更新 | implemented |
 | habit promotion 只能来自多次验证成功 | `tests/test_procedure_memory.py::ProcedureMemoryStoreTest::test_habit_promotion_requires_three_verified_successes` 和 `test_verified_procedure_promotes_to_low_risk_habit`；低于阈值被拒绝 | implemented |

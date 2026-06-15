@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from omniagent.llm.base import LLMAdapter
+from omniagent.learning_governance import format_learning_feedback
 from omniagent.models import (
     ConversationTurn,
     PendingCheckpoint,
@@ -345,6 +346,13 @@ class ResponseGenerator:
             reply = validated
             if actions:
                 reply += "\n\n" + "\n".join(f"- {a}" for a in actions)
+            learning_feedback = (
+                format_learning_feedback(context.task_report.learning_feedback)
+                if context.task_report is not None
+                else ""
+            )
+            if learning_feedback and learning_feedback not in reply:
+                reply += "\n\n" + learning_feedback
             return reply
         except Exception:
             return context.fallback_message
@@ -417,6 +425,7 @@ class ResponseGenerator:
             "completion_evaluation": report.completion_evaluation.to_dict()
             if report.completion_evaluation is not None
             else None,
+            "learning_feedback": report.learning_feedback,
         }
 
     def _summarize_checkpoint(self, checkpoint: PendingCheckpoint) -> dict[str, Any]:
