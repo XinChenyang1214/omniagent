@@ -594,6 +594,7 @@ def test_evidence_index_summarizes_runs_and_learning_artifacts(tmp_path: Path) -
     task_dir = workspace / "tasks" / task_id
     (task_dir / "procedure").mkdir(parents=True)
     (task_dir / "experience").mkdir(parents=True)
+    (task_dir / "learning").mkdir(parents=True)
     (workspace / "skills" / "managed" / "generated.habit.demo").mkdir(parents=True)
     (workspace / "procedures" / "disabled").mkdir(parents=True)
     case_dir.mkdir(parents=True)
@@ -626,6 +627,29 @@ def test_evidence_index_summarizes_runs_and_learning_artifacts(tmp_path: Path) -
                 "experience_id": "exp_2",
                 "status": "succeeded",
                 "validation": {"verdict": "passed"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (task_dir / "learning" / "feedback.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "learning-feedback/v1",
+                "task_id": task_id,
+                "experience": {
+                    "experience_id": "exp_2",
+                    "status": "succeeded",
+                    "validation_verdict": "passed",
+                    "learnable": True,
+                },
+                "procedure": {
+                    "matched_id": "proc_1",
+                    "matched_object_type": "habit",
+                },
+                "habit_fast_path": {"decision": "habit_fast_path_candidate"},
+                "reuse": {"status": "habit_fast_path", "reusable_now": True},
+                "review": {"required": False, "target_type": "habit", "target_id": "proc_1"},
+                "summary_lines": ["habit feedback"],
             }
         ),
         encoding="utf-8",
@@ -819,6 +843,10 @@ def test_evidence_index_summarizes_runs_and_learning_artifacts(tmp_path: Path) -
     assert case["learning_evidence"]["procedure_matches"][0]["procedure_id"] == "proc_1"
     assert case["learning_evidence"]["habit_fast_paths"][0]["habit_id"] == "proc_1"
     assert case["learning_evidence"]["experience_records"][0]["experience_id"] == "exp_2"
+    feedback = case["learning_evidence"]["learning_feedbacks"][0]
+    assert feedback["schema_version"] == "learning-feedback/v1"
+    assert feedback["reuse_status"] == "habit_fast_path"
+    assert feedback["review_target_type"] == "habit"
     assert case["learning_evidence"]["procedure_memory_records"][0]["procedure_id"] == "proc_1"
     assert case["learning_evidence"]["procedure_memory_records"][0]["object_type"] == "habit"
     assert case["learning_evidence"]["procedure_memory_records"][0]["status"] == "disabled"
@@ -949,6 +977,14 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
                     ],
                     "habit_fast_paths": [{"habit_id": "habit_1"}],
                     "experience_records": [],
+                    "learning_feedbacks": [
+                        {
+                            "task_id": "task_1",
+                            "schema_version": "learning-feedback/v1",
+                            "reuse_status": "habit_fast_path",
+                            "review_target_type": "habit",
+                        }
+                    ],
                     "procedure_memory_records": [
                         {
                             "procedure_id": "habit_1",
@@ -1098,9 +1134,7 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
     assert parsed.evidence_skipped_stage == ["planner"]
     assert parsed.evidence_policy_risk_flag == ["planner_context_required"]
     assert parsed.evidence_policy_reason == ["*risk flag*"]
-    assert parsed.evidence_policy_context_budget == [
-        "skill_registry_entries:json_chars:50000+"
-    ]
+    assert parsed.evidence_policy_context_budget == ["skill_registry_entries:json_chars:50000+"]
     assert parsed.evidence_request_payload_stats == [
         "skill_registry_entries:json_chars:10000-49999"
     ]
@@ -1128,9 +1162,7 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
     assert query["filters"]["skipped_stage"] == ["planner"]
     assert query["filters"]["policy_risk_flag"] == []
     assert query["filters"]["policy_reason"] == ["direct execute*"]
-    assert query["filters"]["policy_context_budget"] == [
-        "skill_registry_entries:json_chars:50000+"
-    ]
+    assert query["filters"]["policy_context_budget"] == ["skill_registry_entries:json_chars:50000+"]
     assert query["filters"]["request_payload_stats"] == [
         "skill_registry_entries:json_chars:10000-49999"
     ]
@@ -1164,9 +1196,7 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
     assert query["summary"]["by_policy_decision"] == {"direct_execute": 1}
     assert query["summary"]["by_skipped_stage"] == {"planner": 1}
     assert query["summary"]["by_policy_risk_flag"] == {}
-    assert query["summary"]["by_policy_reason"] == {
-        "direct execute static gates passed": 1
-    }
+    assert query["summary"]["by_policy_reason"] == {"direct execute static gates passed": 1}
     assert query["summary"]["by_policy_context_budget"] == {
         "agent_state_summary:items:6-20": 1,
         "agent_state_summary:json_chars:1000-9999": 1,
@@ -1230,6 +1260,7 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
     assert query["summary"]["by_permission"] == {"filesystem.write:granted": 1}
     assert query["summary"]["by_learning_kind"] == {
         "habit_fast_paths": 1,
+        "learning_feedbacks": 1,
         "procedure_matches": 1,
         "procedure_memory_records": 1,
         "skill_lifecycle_records": 1,
@@ -1238,23 +1269,13 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
     assert risk_query["filters"]["policy_risk_flag"] == ["planner_context_required"]
     assert risk_query["summary"]["matched_cases"] == 1
     assert risk_query["summary"]["by_policy_decision"] == {"plan_required": 1}
-    assert risk_query["summary"]["by_policy_risk_flag"] == {
-        "planner_context_required": 1
-    }
-    assert risk_query["summary"]["by_policy_reason"] == {
-        "risk flag requires planner context": 1
-    }
-    assert risk_query["cases"][0]["policy_risk_flags"] == [
-        "planner_context_required"
-    ]
+    assert risk_query["summary"]["by_policy_risk_flag"] == {"planner_context_required": 1}
+    assert risk_query["summary"]["by_policy_reason"] == {"risk flag requires planner context": 1}
+    assert risk_query["cases"][0]["policy_risk_flags"] == ["planner_context_required"]
     assert reason_query["filters"]["policy_reason"] == ["*risk flag*"]
     assert reason_query["summary"]["matched_cases"] == 1
-    assert reason_query["summary"]["by_policy_reason"] == {
-        "risk flag requires planner context": 1
-    }
-    assert reason_query["cases"][0]["policy_reasons"] == [
-        "risk flag requires planner context"
-    ]
+    assert reason_query["summary"]["by_policy_reason"] == {"risk flag requires planner context": 1}
+    assert reason_query["cases"][0]["policy_reasons"] == ["risk flag requires planner context"]
     assert query["cases"] == [
         {
             "run_id": "run_a",
@@ -1352,6 +1373,7 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
             "embedding_incompatible_match_count": 0,
             "learning_evidence_kinds": [
                 "habit_fast_paths",
+                "learning_feedbacks",
                 "procedure_matches",
                 "procedure_memory_records",
                 "skill_lifecycle_records",
@@ -1361,7 +1383,7 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
             "thread_ids": [],
             "completion_failure_layers": ["none"],
             "model_capability_suspected": False,
-            "learning_evidence_count": 5,
+            "learning_evidence_count": 6,
             "diagnostics_path": "/tmp/eval_runs/run_a/cases/learning_loop_case/diagnostics.md",
             "result_path": None,
         }
@@ -1379,10 +1401,7 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
     assert "policy_risk_flag" in markdown
     assert "- policy_reason: `direct execute*`" in markdown
     assert "- policy_context_budget: `skill_registry_entries:json_chars:50000+`" in markdown
-    assert (
-        "- request_payload_stats: `skill_registry_entries:json_chars:10000-49999`"
-        in markdown
-    )
+    assert "- request_payload_stats: `skill_registry_entries:json_chars:10000-49999`" in markdown
     assert "- node_status: `status:completed`" in markdown
     assert "- critic_action: `action:accept`" in markdown
     assert "- memory_retrieval: `vector_match`" in markdown
@@ -1555,6 +1574,14 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
                     ],
                     "habit_fast_paths": [{"habit_id": "habit_1"}],
                     "experience_records": [{"experience_id": "exp_1"}],
+                    "learning_feedbacks": [
+                        {
+                            "task_id": "task_1",
+                            "schema_version": "learning-feedback/v1",
+                            "reuse_status": "habit_fast_path",
+                            "review_target_type": "habit",
+                        }
+                    ],
                     "procedure_memory_records": [
                         {
                             "procedure_id": "habit_1",
@@ -1959,9 +1986,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         "plan_required": 1,
     }
     assert dashboard["summary"]["by_skipped_stage"] == {"planner": 1}
-    assert dashboard["summary"]["by_policy_risk_flag"] == {
-        "planner_context_required": 1
-    }
+    assert dashboard["summary"]["by_policy_risk_flag"] == {"planner_context_required": 1}
     assert dashboard["summary"]["by_policy_reason"] == {
         "direct execute static gates passed": 1,
         "risk flag requires planner context": 1,
@@ -2022,6 +2047,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert dashboard["summary"]["by_learning_kind"] == {
         "experience_records": 1,
         "habit_fast_paths": 1,
+        "learning_feedbacks": 1,
         "procedure_matches": 3,
         "procedure_memory_records": 5,
         "skill_lifecycle_records": 4,
@@ -2049,42 +2075,31 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         "reviewed": 2,
     }
     assert dashboard["summary"]["repair_entrypoint_count"] == 2
-    assert dashboard["summary"]["regression_command_count"] == len(
-        dashboard["regression_commands"]
-    )
+    assert dashboard["summary"]["regression_command_count"] == len(dashboard["regression_commands"])
     command_values = [item["command"] for item in dashboard["regression_commands"]]
     assert len(command_values) == len(set(command_values))
     assert "poetry run python scripts/run_real_world_evals.py --check-only" in command_values
     assert (
-        "poetry run python scripts/run_real_world_evals.py --build-evidence-index"
-        in command_values
+        "poetry run python scripts/run_real_world_evals.py --build-evidence-index" in command_values
     )
     assert "poetry run python scripts/run_real_world_evals.py --evidence-dashboard" in (
         command_values
     )
     assert (
-        "poetry run python scripts/run_real_world_evals.py --scenario config_case"
-        in command_values
+        "poetry run python scripts/run_real_world_evals.py --scenario config_case" in command_values
     )
     assert (
         "poetry run python scripts/run_real_world_evals.py --include-complex --scenario reasoning_case"
         in command_values
     )
     assert sorted(
-        (
-            item
-            for item in dashboard["regression_commands"]
-            if item.get("kind") == "scenario_rerun"
-        ),
+        (item for item in dashboard["regression_commands"] if item.get("kind") == "scenario_rerun"),
         key=lambda item: item["label"],
     ) == [
         {
             "kind": "scenario_rerun",
             "label": "Rerun scenario config_case",
-            "command": (
-                "poetry run python scripts/run_real_world_evals.py "
-                "--scenario config_case"
-            ),
+            "command": ("poetry run python scripts/run_real_world_evals.py --scenario config_case"),
             "matched_cases": 1,
         },
         {
@@ -2126,9 +2141,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         in command_values
     )
     assert [
-        item
-        for item in dashboard["regression_commands"]
-        if item.get("kind") == "status_query"
+        item for item in dashboard["regression_commands"] if item.get("kind") == "status_query"
     ] == [
         {
             "kind": "status_query",
@@ -2145,11 +2158,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         in command_values
     )
     assert sorted(
-        (
-            item
-            for item in dashboard["regression_commands"]
-            if item.get("kind") == "scenario_query"
-        ),
+        (item for item in dashboard["regression_commands"] if item.get("kind") == "scenario_query"),
         key=lambda item: item["label"],
     ) == [
         {
@@ -2262,11 +2271,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         },
     ]
     assert sorted(
-        (
-            item
-            for item in dashboard["regression_commands"]
-            if item.get("kind") == "category_query"
-        ),
+        (item for item in dashboard["regression_commands"] if item.get("kind") == "category_query"),
         key=lambda item: item["label"],
     ) == [
         {
@@ -2307,11 +2312,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         },
     ]
     assert sorted(
-        (
-            item
-            for item in dashboard["regression_commands"]
-            if item.get("kind") == "requires_query"
-        ),
+        (item for item in dashboard["regression_commands"] if item.get("kind") == "requires_query"),
         key=lambda item: item["label"],
     ) == [
         {
@@ -2331,12 +2332,10 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
                 "--query-evidence-index --evidence-requires network"
             ),
             "matched_cases": 1,
-        }
+        },
     ]
     assert [
-        item
-        for item in dashboard["regression_commands"]
-        if item.get("kind") == "skip_reason_query"
+        item for item in dashboard["regression_commands"] if item.get("kind") == "skip_reason_query"
     ] == [
         {
             "kind": "skip_reason_query",
@@ -2357,11 +2356,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         in command_values
     )
     assert sorted(
-        (
-            item
-            for item in dashboard["regression_commands"]
-            if item.get("kind") == "skill_query"
-        ),
+        (item for item in dashboard["regression_commands"] if item.get("kind") == "skill_query"),
         key=lambda item: item["label"],
     ) == [
         {
@@ -2473,11 +2468,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         },
     ]
     assert sorted(
-        (
-            item
-            for item in dashboard["regression_commands"]
-            if item.get("kind") == "habit_query"
-        ),
+        (item for item in dashboard["regression_commands"] if item.get("kind") == "habit_query"),
         key=lambda item: item["label"],
     ) == [
         {
@@ -2599,7 +2590,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         }
     ]
     assert (
-        "poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-permission \"*\""
+        'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-permission "*"'
         in command_values
     )
     assert (
@@ -2669,7 +2660,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         in command_values
     )
     assert (
-        "poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-policy-risk-flag \"*\""
+        'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-policy-risk-flag "*"'
         in command_values
     )
     assert (
@@ -2677,7 +2668,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         in command_values
     )
     assert (
-        "poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-policy-reason \"*\""
+        'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-policy-reason "*"'
         in command_values
     )
     assert (
@@ -2740,8 +2731,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         {
             "kind": "policy_context_budget_query",
             "label": (
-                "Policy context budget "
-                "planner_skill_registry_entries:json_chars:10000-49999"
+                "Policy context budget planner_skill_registry_entries:json_chars:10000-49999"
             ),
             "command": (
                 "poetry run python scripts/run_real_world_evals.py "
@@ -2752,10 +2742,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         },
         {
             "kind": "policy_context_budget_query",
-            "label": (
-                "Policy context budget "
-                "skill_registry_entries:json_chars:50000+"
-            ),
+            "label": ("Policy context budget skill_registry_entries:json_chars:50000+"),
             "command": (
                 "poetry run python scripts/run_real_world_evals.py "
                 "--query-evidence-index --evidence-policy-context-budget "
@@ -2774,10 +2761,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     ) == [
         {
             "kind": "request_payload_stats_query",
-            "label": (
-                "Request payload stats "
-                "skill_registry_entries:json_chars:10000-49999"
-            ),
+            "label": ("Request payload stats skill_registry_entries:json_chars:10000-49999"),
             "command": (
                 "poetry run python scripts/run_real_world_evals.py "
                 "--query-evidence-index --evidence-request-payload-stats "
@@ -3307,9 +3291,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         "plan_required": 1,
     }
     assert policy_query["summary"]["by_skipped_stage"] == {"planner": 1}
-    assert policy_query["summary"]["by_policy_risk_flag"] == {
-        "planner_context_required": 1
-    }
+    assert policy_query["summary"]["by_policy_risk_flag"] == {"planner_context_required": 1}
     assert policy_query["summary"]["by_policy_reason"] == {
         "direct execute static gates passed": 1,
         "risk flag requires planner context": 1,
@@ -3341,9 +3323,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert policy_query["cases"][0]["policy_decisions"] == ["direct_execute"]
     assert policy_query["cases"][0]["skipped_stages"] == ["planner"]
     assert policy_query["cases"][0]["policy_risk_flags"] == []
-    assert policy_query["cases"][0]["policy_reasons"] == [
-        "direct execute static gates passed"
-    ]
+    assert policy_query["cases"][0]["policy_reasons"] == ["direct execute static gates passed"]
     assert policy_query["cases"][0]["policy_context_budget_signals"] == [
         "recorded",
         "task_request:json_chars:1-999",
@@ -3369,12 +3349,8 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     ]
     assert policy_query["cases"][1]["scenario_id"] == "reasoning_case"
     assert policy_query["cases"][1]["policy_decisions"] == ["plan_required"]
-    assert policy_query["cases"][1]["policy_risk_flags"] == [
-        "planner_context_required"
-    ]
-    assert policy_query["cases"][1]["policy_reasons"] == [
-        "risk flag requires planner context"
-    ]
+    assert policy_query["cases"][1]["policy_risk_flags"] == ["planner_context_required"]
+    assert policy_query["cases"][1]["policy_reasons"] == ["risk flag requires planner context"]
     skipped_query = dashboard["views"]["planner_skipped_cases"]["query"]
     assert skipped_query["filters"]["skipped_stage"] == ["planner"]
     assert skipped_query["summary"]["matched_cases"] == 1
@@ -3384,13 +3360,9 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     risk_query = dashboard["views"]["policy_risk_flag_cases"]["query"]
     assert risk_query["filters"]["policy_risk_flag"] == ["*"]
     assert risk_query["summary"]["matched_cases"] == 1
-    assert risk_query["summary"]["by_policy_risk_flag"] == {
-        "planner_context_required": 1
-    }
+    assert risk_query["summary"]["by_policy_risk_flag"] == {"planner_context_required": 1}
     assert risk_query["cases"][0]["scenario_id"] == "reasoning_case"
-    assert risk_query["cases"][0]["policy_risk_flags"] == [
-        "planner_context_required"
-    ]
+    assert risk_query["cases"][0]["policy_risk_flags"] == ["planner_context_required"]
     reason_query = dashboard["views"]["policy_reason_cases"]["query"]
     assert reason_query["filters"]["policy_reason"] == ["*"]
     assert reason_query["summary"]["matched_cases"] == 2
@@ -3399,13 +3371,9 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         "risk flag requires planner context": 1,
     }
     assert reason_query["cases"][0]["scenario_id"] == "learning_loop_case"
-    assert reason_query["cases"][0]["policy_reasons"] == [
-        "direct execute static gates passed"
-    ]
+    assert reason_query["cases"][0]["policy_reasons"] == ["direct execute static gates passed"]
     assert reason_query["cases"][1]["scenario_id"] == "reasoning_case"
-    assert reason_query["cases"][1]["policy_reasons"] == [
-        "risk flag requires planner context"
-    ]
+    assert reason_query["cases"][1]["policy_reasons"] == ["risk flag requires planner context"]
     budget_query = dashboard["views"]["policy_context_budget_cases"]["query"]
     assert budget_query["filters"]["policy_context_budget"] == ["recorded"]
     assert budget_query["summary"]["matched_cases"] == 1
@@ -3467,9 +3435,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     coverage_query = dashboard["views"]["skill_promotion_coverage_cases"]["query"]
     assert coverage_query["summary"]["matched_cases"] == 1
     assert coverage_query["summary"]["by_promotion_generation_type"] == {"file": 1}
-    assert coverage_query["summary"]["by_promotion_source_target"] == {
-        "builtin.file.basic": 1
-    }
+    assert coverage_query["summary"]["by_promotion_source_target"] == {"builtin.file.basic": 1}
     assert coverage_query["cases"][0]["scenario_id"] == "learning_loop_case"
     assert coverage_query["cases"][0]["promotion_generation_types"] == ["file"]
     assert coverage_query["cases"][0]["promotion_source_targets"] == ["builtin.file.basic"]
@@ -3506,11 +3472,16 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert learning_gate_query["cases"][0]["learning_evidence_kinds"] == [
         "experience_records",
         "habit_fast_paths",
+        "learning_feedbacks",
         "procedure_matches",
         "procedure_memory_records",
         "skill_lifecycle_records",
         "skill_lineages",
     ]
+    feedback_query = dashboard["views"]["learning_feedback_cases"]["query"]
+    assert feedback_query["summary"]["matched_cases"] == 1
+    assert feedback_query["cases"][0]["scenario_id"] == "learning_loop_case"
+    assert "learning_feedbacks" in feedback_query["cases"][0]["learning_evidence_kinds"]
     governance_query = dashboard["views"]["learning_governance_cases"]["query"]
     assert governance_query["summary"]["matched_cases"] == 5
     assert governance_query["cases"][0]["scenario_id"] == "learning_loop_case"
@@ -3519,6 +3490,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert governance_query["cases"][0]["learning_evidence_kinds"] == [
         "experience_records",
         "habit_fast_paths",
+        "learning_feedbacks",
         "procedure_matches",
         "procedure_memory_records",
         "skill_lifecycle_records",
@@ -3530,15 +3502,14 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert history_query["cases"][0]["learning_evidence_kinds"] == [
         "experience_records",
         "habit_fast_paths",
+        "learning_feedbacks",
         "procedure_matches",
         "procedure_memory_records",
         "skill_lifecycle_records",
         "skill_lineages",
     ]
     assert history_query["cases"][-1]["scenario_id"] == "learning_rollback_case"
-    assert history_query["cases"][-1]["learning_evidence_kinds"] == [
-        "skill_lifecycle_records"
-    ]
+    assert history_query["cases"][-1]["learning_evidence_kinds"] == ["skill_lifecycle_records"]
     approval_query = dashboard["views"]["learning_approval_cases"]["query"]
     assert approval_query["summary"]["matched_cases"] == 2
     assert approval_query["cases"][0]["scenario_id"] == "learning_loop_case"
@@ -3547,6 +3518,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert approval_query["cases"][0]["learning_evidence_kinds"] == [
         "experience_records",
         "habit_fast_paths",
+        "learning_feedbacks",
         "procedure_matches",
         "procedure_memory_records",
         "skill_lifecycle_records",
@@ -3560,6 +3532,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert promotion_query["cases"][0]["learning_evidence_kinds"] == [
         "experience_records",
         "habit_fast_paths",
+        "learning_feedbacks",
         "procedure_matches",
         "procedure_memory_records",
         "skill_lifecycle_records",
@@ -3572,18 +3545,15 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert validation_query["cases"][0]["learning_evidence_kinds"] == [
         "experience_records",
         "habit_fast_paths",
+        "learning_feedbacks",
         "procedure_matches",
         "procedure_memory_records",
         "skill_lifecycle_records",
         "skill_lineages",
     ]
-    assert validation_query["cases"][1]["scenario_id"] == (
-        "procedure_learning_validation_case"
-    )
+    assert validation_query["cases"][1]["scenario_id"] == ("procedure_learning_validation_case")
     assert validation_query["cases"][1]["procedure_ids"] == ["proc_validated"]
-    assert validation_query["cases"][1]["learning_evidence_kinds"] == [
-        "procedure_memory_records"
-    ]
+    assert validation_query["cases"][1]["learning_evidence_kinds"] == ["procedure_memory_records"]
     edit_query = dashboard["views"]["learning_edit_cases"]["query"]
     assert edit_query["summary"]["matched_cases"] == 1
     assert edit_query["cases"][0]["scenario_id"] == "learning_edit_case"
@@ -3614,9 +3584,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert rollback_query["summary"]["matched_cases"] == 1
     assert rollback_query["cases"][0]["scenario_id"] == "learning_rollback_case"
     assert rollback_query["cases"][0]["lineage_skill_names"] == ["imported.learning_echo"]
-    assert rollback_query["cases"][0]["learning_evidence_kinds"] == [
-        "skill_lifecycle_records"
-    ]
+    assert rollback_query["cases"][0]["learning_evidence_kinds"] == ["skill_lifecycle_records"]
     rejection_query = dashboard["views"]["learning_rejection_cases"]["query"]
     assert rejection_query["summary"]["matched_cases"] == 1
     assert rejection_query["cases"][0]["scenario_id"] == "learning_rejection_case"
@@ -3650,10 +3618,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert "## Eval Coverage Cases" in markdown
     assert "## Skipped Eval Cases" in markdown
     assert "skip_reason" in markdown
-    assert (
-        "`poetry run python scripts/run_real_world_evals.py --build-evidence-index`"
-        in markdown
-    )
+    assert "`poetry run python scripts/run_real_world_evals.py --build-evidence-index`" in markdown
     assert (
         "`poetry run python scripts/run_real_world_evals.py --include-complex --scenario reasoning_case`"
         in markdown
@@ -3741,7 +3706,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         in markdown
     )
     assert (
-        "`poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-policy-reason \"*\"`"
+        '`poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-policy-reason "*"`'
         in markdown
     )
     assert (
@@ -3773,7 +3738,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
         in markdown
     )
     assert (
-        "`poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-learning-validation \"*\"`"
+        '`poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-learning-validation "*"`'
         in markdown
     )
     assert (
@@ -3958,9 +3923,7 @@ def test_evidence_dashboard_ignores_empty_failure_layers_for_repair_commands() -
 
     dashboard = evals.build_evidence_dashboard(index, limit=5)
 
-    assert [item["failure_layer"] for item in dashboard["repair_entrypoints"]] == [
-        "skill_or_tool"
-    ]
+    assert [item["failure_layer"] for item in dashboard["repair_entrypoints"]] == ["skill_or_tool"]
     commands = [item["command"] for item in dashboard["regression_commands"]]
     assert (
         "poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-failure-layer None"
@@ -4023,7 +3986,4 @@ def test_evidence_dashboard_cli_writes_regression_command_file(tmp_path: Path) -
         "poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-failure-layer skill_or_tool"
         in commands
     )
-    assert (
-        "poetry run python scripts/run_real_world_evals.py --scenario tool_failure"
-        in commands
-    )
+    assert "poetry run python scripts/run_real_world_evals.py --scenario tool_failure" in commands

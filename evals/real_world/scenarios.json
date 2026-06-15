@@ -120,6 +120,153 @@
       }
     },
     {
+      "id": "learning_loop_feedback_sequence",
+      "kind": "task_sequence",
+      "category": "learning_loop",
+      "description": "Build and govern learning feedback across repeated local file tasks.",
+      "timeout": 90,
+      "max_permission": "L2",
+      "steps": [
+        {
+          "type": "run",
+          "goal": "维护学习反馈循环审计记录：写入 reports/learning_feedback_loop.md",
+          "expected_output": "reports/learning_feedback_loop.md contains entry: draft.",
+          "executor": "file",
+          "payload": {
+            "action": "write",
+            "path": "reports/learning_feedback_loop.md",
+            "content": "entry: draft\n",
+            "overwrite": true
+          },
+          "capture": {
+            "procedure_id": "learning_feedback.procedure.generated_draft_id",
+            "draft_task_id": "task.task_id"
+          }
+        },
+        {
+          "type": "cli",
+          "args": [
+            "procedure",
+            "review",
+            "${procedure_id}",
+            "--decision",
+            "approved",
+            "--evidence-ref",
+            "tasks/${draft_task_id}/completion/evaluation.json",
+            "--note",
+            "approve eval learning feedback draft"
+          ]
+        },
+        {
+          "type": "run",
+          "goal": "继续维护学习反馈循环审计记录：追加 reports/learning_feedback_loop.md",
+          "expected_output": "reports/learning_feedback_loop.md contains entry: reuse-2.",
+          "executor": "file",
+          "payload": {
+            "action": "append",
+            "path": "reports/learning_feedback_loop.md",
+            "content": "entry: reuse-2\n"
+          }
+        },
+        {
+          "type": "run",
+          "goal": "继续维护学习反馈循环审计记录：追加 reports/learning_feedback_loop.md",
+          "expected_output": "reports/learning_feedback_loop.md contains entry: reuse-3.",
+          "executor": "file",
+          "payload": {
+            "action": "append",
+            "path": "reports/learning_feedback_loop.md",
+            "content": "entry: reuse-3\n"
+          }
+        },
+        {
+          "type": "cli",
+          "args": [
+            "learning",
+            "promote",
+            "--type",
+            "procedure",
+            "${procedure_id}",
+            "--note",
+            "promote eval learning feedback procedure"
+          ]
+        },
+        {
+          "type": "run",
+          "goal": "继续维护学习反馈循环审计记录：追加 reports/learning_feedback_loop.md",
+          "expected_output": "reports/learning_feedback_loop.md contains entry: habit-fast-path.",
+          "executor": "file",
+          "payload": {
+            "action": "append",
+            "path": "reports/learning_feedback_loop.md",
+            "content": "entry: habit-fast-path\n"
+          }
+        },
+        {
+          "type": "cli",
+          "args": [
+            "learning",
+            "explain-match",
+            "继续维护学习反馈循环审计记录：追加 reports/learning_feedback_loop.md"
+          ]
+        },
+        {
+          "type": "cli",
+          "args": [
+            "learning",
+            "edit",
+            "--type",
+            "habit",
+            "${procedure_id}",
+            "--patch",
+            "{\"trigger\":{\"task_patterns\":[\"学习反馈循环审计记录 修正后\"]}}",
+            "--note",
+            "correct trigger after eval feedback"
+          ]
+        },
+        {
+          "type": "cli",
+          "args": [
+            "learning",
+            "disable",
+            "--type",
+            "procedure",
+            "${procedure_id}",
+            "--note",
+            "disable corrected procedure after eval governance check"
+          ]
+        }
+      ],
+      "assertions": {
+        "must_succeed": true,
+        "min_successful_turns": 9,
+        "file_contains": [
+          {"path": "reports/learning_feedback_loop.md", "text": "entry: draft"},
+          {"path": "reports/learning_feedback_loop.md", "text": "entry: reuse-2"},
+          {"path": "reports/learning_feedback_loop.md", "text": "entry: reuse-3"},
+          {"path": "reports/learning_feedback_loop.md", "text": "entry: habit-fast-path"}
+        ],
+        "required_skill_any": ["builtin.file.basic"],
+        "required_policy_decision_any": ["direct_execute"],
+        "required_learning_feedback_reuse_status_all": [
+          "new_draft_needs_review",
+          "verified_procedure_reuse",
+          "habit_fast_path"
+        ],
+        "required_learning_feedback_review_target_any": ["habit"],
+        "required_learning_feedback_habit_decision_any": ["habit_fast_path_candidate"],
+        "required_procedure_status_any": ["disabled"],
+        "required_procedure_review_status_any": ["edited_requires_review"],
+        "required_procedure_audit_event_all": [
+          "created_from_experience",
+          "reviewed",
+          "promoted_to_habit",
+          "edited",
+          "disabled"
+        ]
+      }
+    },
+    {
       "id": "csv_sales_summary",
       "kind": "task",
       "category": "data",

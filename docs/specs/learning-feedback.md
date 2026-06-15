@@ -7,7 +7,7 @@ Last reviewed: 2026-06-15
 - Document type: spec
 - Workstream: `META-010` / Learning feedback
 - Document status: confirmed
-- Implementation status: implementing
+- Implementation status: verified
 - Authority scope: 任务结束后向用户展示 learning loop 状态的最小数据契约和输出规则
 - Parent workstream: [`AGENT_USABILITY_LEARNING_LOOP_MVP.md`](../workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md)
 
@@ -21,6 +21,7 @@ Learning feedback 让用户在任务结束时直接看懂 Agent 是否学到了�
 ExperienceRecord + procedure_match + habit_fast_path + procedure memory
   -> learning-feedback/v1
   -> CLI / chat task ending reply
+  -> real-world eval evidence index / dashboard
 ```
 
 ## 输出时机
@@ -70,10 +71,12 @@ Required top-level fields:
 | CLI 非 JSON 输出可见学习状态 | `tests/test_learning_feedback.py::LearningFeedbackIntegrationTest::test_cli_plain_output_includes_learning_feedback`；输出包含 `学习反馈`、经验记录和 review 提示 | implemented |
 | Habit fast path 可解释复用收益和修正入口 | `tests/test_learning_feedback.py::LearningFeedbackIntegrationTest::test_habit_fast_path_feedback_explains_reuse_and_correction_commands`；feedback 说明命中 habit、fast path accepted、可禁用或修正 | implemented |
 | Chat responder 不遗漏 learning feedback | `tests/test_responder_validation.py::ResponderIntegrationTest::test_learning_feedback_injected_and_appended_to_reply`；Responder payload 包含 feedback，最终回复追加 `学习反馈` 区块 | implemented |
+| 连续任务中能验证生成、复用、解释、修正和治理学习结果 | `evals/real_world/scenarios.json::learning_loop_feedback_sequence`；`scripts/run_real_world_evals.py --scenario learning_loop_feedback_sequence` 验证 draft -> approved procedure -> verified reuse -> habit fast path -> explain-match -> edit -> disable | verified |
+| 真实评测证据进入 evidence index / dashboard | `tests/test_real_world_eval_diagnostics.py` 覆盖 `learning_feedbacks` evidence kind、query filter 和 `learning_feedback_cases` dashboard 视图；`--build-evidence-index` / `--query-evidence-index --evidence-learning-kind learning_feedbacks` / `--evidence-dashboard` 可消费该证据 | verified |
 
 ## 非目标
 
-- 不新增 dashboard。
+- 不新增面向最终用户的独立产品 dashboard；本阶段只扩展真实评测 evidence dashboard。
 - 不新增 skill 类型。
-- 不扩大真实评测矩阵。
+- 不扩大非 learning-loop 能力矩阵；本阶段只新增聚焦 learning feedback 的连续任务场景。
 - 不绕过已有 review、permission、validator 或 promotion gate。

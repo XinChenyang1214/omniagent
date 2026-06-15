@@ -17,7 +17,7 @@ OmniAgent 当前代码基础是一个以 task 为中心的本地嵌入式 Agent 
 - 轻量本地运行时：stdlib 核心 + 默认本地 embedding 推理依赖 + OpenAI 兼容 LLM
 - 默认离线运行，除 LLM 调用和显式授权网络任务外不访问外部网络
 
-当前代码层面已完成三阶段 MVP、P0 补丁轮、`BASECAP-001`、`BASECAP-002`、`REAL-EVAL-005`、`CAP-EVAL-001` 和 `META-009` 首轮落地结果；这些作为旧实现基础和迁移输入。现阶段主线切换为 `META-010` Agent usability and learning loop MVP：Phase 1 Agent state、Phase 2 Experience records、Phase 3 Procedure memory、Phase 4 Habit fast path 和 Phase 5 Skill promotion 已实现；下一步进入 learning-loop 真实评测与学习治理增强。
+当前代码层面已完成三阶段 MVP、P0 补丁轮、`BASECAP-001`、`BASECAP-002`、`REAL-EVAL-005`、`CAP-EVAL-001` 和 `META-009` 首轮落地结果；这些作为旧实现基础和迁移输入。现阶段主线切换为 `META-010` Agent usability and learning loop MVP：Phase 1 Agent state、Phase 2 Experience records、Phase 3 Procedure memory、Phase 4 Habit fast path、Phase 5 Skill promotion 和 Phase 6 Learning feedback 已实现并接入真实评测证据；下一步进入更深的 learning-loop 纠错、复审与治理增强。
 
 ## 权威文档
 
@@ -211,7 +211,7 @@ poetry run python -m pytest tests/
 poetry run ruff check src/ tests/ scripts/run_real_world_evals.py
 ```
 
-当前复杂场景评测已归档为旧实现回归集。`META-010` 期间真实场景评测应继续维护旧基线，同时新增 learning-loop evidence，验证 Agent state、ExperienceRecord、procedure / habit 命中、validation evidence 和 skill promotion lineage。运行后重点查看：
+当前复杂场景评测已归档为旧实现回归集。`META-010` 期间真实场景评测应继续维护旧基线，同时新增 learning-loop evidence，验证 Agent state、ExperienceRecord、procedure / habit 命中、validation evidence、skill promotion lineage 和 learning feedback。运行后重点查看：
 
 - `eval_runs/<run_id>/summary.md`
 - `eval_runs/<run_id>/cases/<scenario_id>/result.json`

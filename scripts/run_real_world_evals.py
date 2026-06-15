@@ -124,12 +124,14 @@ def _normalize_scenarios(path: Path) -> list[dict[str, Any]]:
             raise ValueError(f"duplicate scenario id: {scenario_id}")
         seen.add(scenario_id)
         kind = str(item.get("kind", "task"))
-        if kind not in {"task", "chat_sequence"}:
+        if kind not in {"task", "chat_sequence", "task_sequence"}:
             raise ValueError(f"{scenario_id}: unsupported kind {kind}")
         if kind == "task" and not item.get("goal"):
             raise ValueError(f"{scenario_id}: task scenario requires goal")
         if kind == "chat_sequence" and not item.get("turns"):
             raise ValueError(f"{scenario_id}: chat_sequence requires turns")
+        if kind == "task_sequence" and not item.get("steps"):
+            raise ValueError(f"{scenario_id}: task_sequence requires steps")
         normalized.append(item)
     return normalized
 
@@ -378,6 +380,49 @@ def _append_common_args(cmd: list[str], scenario: dict[str, Any]) -> None:
     cmd.append("--json")
 
 
+def _render_sequence_value(value: Any, variables: dict[str, Any]) -> Any:
+    if isinstance(value, str):
+        rendered = value
+        for name, replacement in variables.items():
+            rendered = rendered.replace("${" + name + "}", str(replacement))
+        return rendered
+    if isinstance(value, list):
+        return [_render_sequence_value(item, variables) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _render_sequence_value(item, variables) for key, item in value.items()}
+    return value
+
+
+def _json_path_value(payload: Any, path: str) -> Any:
+    current = payload
+    for part in str(path).split("."):
+        if not part:
+            continue
+        if isinstance(current, dict):
+            current = current.get(part)
+        elif isinstance(current, list):
+            try:
+                current = current[int(part)]
+            except (ValueError, IndexError):
+                return None
+        else:
+            return None
+    return current
+
+
+def _capture_sequence_values(
+    *, execution: dict[str, Any], step: dict[str, Any], variables: dict[str, Any]
+) -> None:
+    captures = step.get("capture")
+    if not isinstance(captures, dict):
+        return
+    payload = execution.get("json")
+    for name, path in captures.items():
+        value = _json_path_value(payload, str(path))
+        if value is not None:
+            variables[str(name)] = value
+
+
 def _run_command(
     *,
     cmd: list[str],
@@ -508,6 +553,15 @@ def _task_success(payload: dict[str, Any] | None) -> bool:
     return False
 
 
+def _execution_success(execution: dict[str, Any]) -> bool:
+    payload = execution.get("json")
+    if not isinstance(payload, dict):
+        return False
+    if isinstance(payload.get("result"), dict) or isinstance(payload.get("task_report"), dict):
+        return _task_success(payload)
+    return int(execution.get("exit_code") or 0) == 0
+
+
 def _collect_evidence(
     workspace: Path,
     task_ids: list[str],
@@ -531,6 +585,7 @@ def _collect_evidence(
         "policy_decisions": [],
         "request_payload_stats": [],
         "llm_calls": [],
+        "learning_feedbacks": [],
     }
     used_skills: set[str] = set()
 
@@ -634,6 +689,14 @@ def _collect_evidence(
                     _summarize_completion_evaluation(task_id, completion)
                 )
 
+        feedback_path = task_dir / "learning" / "feedback.json"
+        if feedback_path.exists():
+            feedback = _load_json(feedback_path)
+            if isinstance(feedback, dict):
+                evidence["learning_feedbacks"].append(
+                    _summarize_learning_feedback(task_id, feedback)
+                )
+
         for call_path in sorted((task_dir / "llm_calls").glob("*.json")):
             call = _load_json(call_path)
             usage = call.get("usage") if isinstance(call.get("usage"), dict) else {}
@@ -722,6 +785,34 @@ def _summarize_completion_evaluation(task_id: str, payload: dict[str, Any]) -> d
         "missing_requirements": payload.get("missing_requirements", []),
         "unexpected_side_effects": payload.get("unexpected_side_effects", []),
         "evidence": payload.get("evidence", []),
+    }
+
+
+def _summarize_learning_feedback(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    experience = payload.get("experience") if isinstance(payload.get("experience"), dict) else {}
+    procedure = payload.get("procedure") if isinstance(payload.get("procedure"), dict) else {}
+    habit = (
+        payload.get("habit_fast_path") if isinstance(payload.get("habit_fast_path"), dict) else {}
+    )
+    reuse = payload.get("reuse") if isinstance(payload.get("reuse"), dict) else {}
+    review = payload.get("review") if isinstance(payload.get("review"), dict) else {}
+    return {
+        "task_id": task_id,
+        "schema_version": payload.get("schema_version"),
+        "experience_id": experience.get("experience_id"),
+        "experience_status": experience.get("status"),
+        "validation_verdict": experience.get("validation_verdict"),
+        "learnable": experience.get("learnable"),
+        "matched_procedure_id": procedure.get("matched_id"),
+        "generated_draft_id": procedure.get("generated_draft_id"),
+        "matched_object_type": procedure.get("matched_object_type"),
+        "habit_fast_path_decision": habit.get("decision"),
+        "reuse_status": reuse.get("status"),
+        "reusable_now": reuse.get("reusable_now"),
+        "review_required": review.get("required"),
+        "review_target_type": review.get("target_type"),
+        "review_target_id": review.get("target_id"),
+        "summary_line_count": len(payload.get("summary_lines") or []),
     }
 
 
@@ -1281,6 +1372,41 @@ def _write_case_diagnostics(
                 )
         lines.append("")
 
+    if evidence.get("learning_feedbacks"):
+        lines.extend(["## Learning Feedback", ""])
+        lines.extend(
+            _markdown_table(
+                [
+                    "Task",
+                    "Schema",
+                    "Experience",
+                    "Validation",
+                    "Reuse",
+                    "Reusable",
+                    "Generated",
+                    "Matched",
+                    "Fast Path",
+                    "Review Target",
+                ],
+                [
+                    [
+                        item.get("task_id"),
+                        item.get("schema_version"),
+                        item.get("experience_id"),
+                        item.get("validation_verdict"),
+                        item.get("reuse_status"),
+                        item.get("reusable_now"),
+                        item.get("generated_draft_id"),
+                        item.get("matched_procedure_id"),
+                        item.get("habit_fast_path_decision"),
+                        item.get("review_target_type"),
+                    ]
+                    for item in evidence.get("learning_feedbacks", [])
+                ],
+            )
+        )
+        lines.append("")
+
     embedding_summary = (
         evidence.get("embedding_summary")
         if isinstance(evidence.get("embedding_summary"), dict)
@@ -1445,6 +1571,69 @@ def _assert_file_not_contains(workspace: Path, item: dict[str, Any], issues: lis
         issues.append(f"file {relative} contains forbidden text: {forbidden}")
 
 
+def _workspace_procedure_records(workspace: Path) -> list[dict[str, Any]]:
+    procedures_root = workspace / "procedures"
+    if not procedures_root.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    for path in sorted(procedures_root.glob("*/*.json")):
+        payload = _load_json(path)
+        if isinstance(payload, dict):
+            records.append(payload)
+    return records
+
+
+def _procedure_record_values(workspace: Path, key: str) -> list[str]:
+    values: list[str] = []
+    for record in _workspace_procedure_records(workspace):
+        value = record.get(key)
+        if isinstance(value, list):
+            candidates = [str(item) for item in value if item is not None]
+        elif value is None:
+            candidates = []
+        else:
+            candidates = [str(value)]
+        for candidate in candidates:
+            if candidate and candidate not in values:
+                values.append(candidate)
+    return values
+
+
+def _procedure_audit_event_values(workspace: Path) -> list[str]:
+    values: list[str] = []
+    for record in _workspace_procedure_records(workspace):
+        notes = record.get("audit_notes")
+        if not isinstance(notes, list):
+            continue
+        for note in notes:
+            if not isinstance(note, dict):
+                continue
+            event = str(note.get("event") or "")
+            if event and event not in values:
+                values.append(event)
+    return values
+
+
+def _assert_required_any(
+    *, label: str, expected: set[str], observed: list[str], issues: list[str]
+) -> None:
+    if expected and not (expected & set(observed)):
+        issues.append(
+            f"missing required {label}; expected any of {sorted(expected)}, got {sorted(observed)}"
+        )
+
+
+def _assert_required_all(
+    *, label: str, expected: set[str], observed: list[str], issues: list[str]
+) -> None:
+    missing = expected - set(observed)
+    if missing:
+        issues.append(
+            f"missing required {label}; expected all of {sorted(expected)}, "
+            f"missing {sorted(missing)}, got {sorted(observed)}"
+        )
+
+
 def _evaluate_assertions(
     *,
     scenario: dict[str, Any],
@@ -1454,7 +1643,7 @@ def _evaluate_assertions(
 ) -> tuple[bool, list[str], str]:
     assertions = scenario.get("assertions", {})
     issues: list[str] = []
-    successes = [_task_success(item.get("json")) for item in executions]
+    successes = [_execution_success(item) for item in executions]
     any_success = any(successes)
     all_commands_parsed = all(item.get("json") is not None for item in executions)
 
@@ -1695,6 +1884,77 @@ def _evaluate_assertions(
                 f"{sorted(required_policy_decisions)}, got {sorted(seen_policy_decisions)}"
             )
 
+    learning_feedbacks = [
+        item for item in evidence.get("learning_feedbacks", []) if isinstance(item, dict)
+    ]
+    feedback_reuse_statuses = [
+        str(item.get("reuse_status"))
+        for item in learning_feedbacks
+        if item.get("reuse_status") is not None
+    ]
+    _assert_required_any(
+        label="learning feedback reuse status",
+        expected={
+            str(item) for item in assertions.get("required_learning_feedback_reuse_status_any", [])
+        },
+        observed=feedback_reuse_statuses,
+        issues=issues,
+    )
+    _assert_required_all(
+        label="learning feedback reuse statuses",
+        expected={
+            str(item) for item in assertions.get("required_learning_feedback_reuse_status_all", [])
+        },
+        observed=feedback_reuse_statuses,
+        issues=issues,
+    )
+    feedback_review_targets = [
+        str(item.get("review_target_type"))
+        for item in learning_feedbacks
+        if item.get("review_target_type") is not None
+    ]
+    _assert_required_any(
+        label="learning feedback review target",
+        expected={
+            str(item) for item in assertions.get("required_learning_feedback_review_target_any", [])
+        },
+        observed=feedback_review_targets,
+        issues=issues,
+    )
+    feedback_fast_path_decisions = [
+        str(item.get("habit_fast_path_decision"))
+        for item in learning_feedbacks
+        if item.get("habit_fast_path_decision") is not None
+    ]
+    _assert_required_any(
+        label="learning feedback habit fast path decision",
+        expected={
+            str(item)
+            for item in assertions.get("required_learning_feedback_habit_decision_any", [])
+        },
+        observed=feedback_fast_path_decisions,
+        issues=issues,
+    )
+
+    _assert_required_any(
+        label="procedure status",
+        expected={str(item) for item in assertions.get("required_procedure_status_any", [])},
+        observed=_procedure_record_values(workspace, "status"),
+        issues=issues,
+    )
+    _assert_required_any(
+        label="procedure review status",
+        expected={str(item) for item in assertions.get("required_procedure_review_status_any", [])},
+        observed=_procedure_record_values(workspace, "review_status"),
+        issues=issues,
+    )
+    _assert_required_all(
+        label="procedure audit events",
+        expected={str(item) for item in assertions.get("required_procedure_audit_event_all", [])},
+        observed=_procedure_audit_event_values(workspace),
+        issues=issues,
+    )
+
     required_completion_layers = {
         str(item) for item in assertions.get("required_completion_failure_layer_any", [])
     }
@@ -1885,6 +2145,54 @@ def _run_chat_scenario(
     return executions
 
 
+def _run_task_sequence_scenario(
+    *, scenario: dict[str, Any], workspace: Path, env: dict[str, str]
+) -> list[dict[str, Any]]:
+    executions: list[dict[str, Any]] = []
+    variables: dict[str, Any] = {}
+    timeout = int(scenario.get("process_timeout", int(scenario.get("timeout", 60)) + 180))
+    for index, raw_step in enumerate(scenario.get("steps", []), start=1):
+        if not isinstance(raw_step, dict):
+            raise ValueError(f"{scenario['id']}: steps[{index}] must be an object")
+        step = _render_sequence_value(raw_step, variables)
+        step_type = str(step.get("type", "run")).strip().lower()
+        if step_type == "run":
+            if not step.get("goal"):
+                raise ValueError(f"{scenario['id']}: steps[{index}] run requires goal")
+            merged = dict(scenario)
+            merged.update({key: value for key, value in step.items() if key != "type"})
+            cmd = [
+                sys.executable,
+                "-m",
+                "omniagent",
+                "--workspace",
+                str(workspace),
+                "run",
+                str(merged["goal"]),
+            ]
+            _append_common_args(cmd, merged)
+        elif step_type == "cli":
+            args = step.get("args")
+            if not isinstance(args, list) or not args:
+                raise ValueError(f"{scenario['id']}: steps[{index}] cli requires args")
+            cmd = [
+                sys.executable,
+                "-m",
+                "omniagent",
+                "--workspace",
+                str(workspace),
+                *[str(item) for item in args],
+            ]
+            if step.get("json", True) and "--json" not in cmd:
+                cmd.append("--json")
+        else:
+            raise ValueError(f"{scenario['id']}: unsupported sequence step type {step_type}")
+        execution = _run_command(cmd=cmd, env=env, timeout_seconds=timeout, cwd=REPO_ROOT)
+        executions.append(execution)
+        _capture_sequence_values(execution=execution, step=step, variables=variables)
+    return executions
+
+
 def _write_case_artifacts(case_dir: Path, executions: list[dict[str, Any]]) -> None:
     for index, execution in enumerate(executions, start=1):
         prefix = f"turn_{index:02d}"
@@ -1911,6 +2219,8 @@ def _run_one(
 
     if scenario.get("kind", "task") == "chat_sequence":
         executions = _run_chat_scenario(scenario=scenario, workspace=workspace, env=env)
+    elif scenario.get("kind", "task") == "task_sequence":
+        executions = _run_task_sequence_scenario(scenario=scenario, workspace=workspace, env=env)
     else:
         executions = _run_task_scenario(scenario=scenario, workspace=workspace, env=env)
 
@@ -2246,6 +2556,7 @@ def _read_learning_artifacts(
         "procedure_matches": [],
         "habit_fast_paths": [],
         "experience_records": [],
+        "learning_feedbacks": [],
         "procedure_memory_records": [],
         "skill_lineages": [],
         "skill_lifecycle_records": [],
@@ -2325,6 +2636,17 @@ def _read_learning_artifacts(
                 )
             artifacts.append(
                 _artifact_record(experience_path, run_dir=run_dir, kind="experience_record")
+            )
+
+        feedback_path = task_dir / "learning" / "feedback.json"
+        if feedback_path.exists():
+            payload = _load_json(feedback_path)
+            if isinstance(payload, dict):
+                summary = _summarize_learning_feedback(task_id, payload)
+                summary["path"] = str(feedback_path)
+                learning["learning_feedbacks"].append(summary)
+            artifacts.append(
+                _artifact_record(feedback_path, run_dir=run_dir, kind="learning_feedback")
             )
 
     procedures_root = workspace / "procedures"
@@ -2454,6 +2776,7 @@ def _summarize_result_for_index(
         "procedure_matches": [],
         "habit_fast_paths": [],
         "experience_records": [],
+        "learning_feedbacks": [],
         "procedure_memory_records": [],
         "skill_lineages": [],
         "skill_lifecycle_records": [],
@@ -2507,12 +2830,8 @@ def _summarize_result_for_index(
         "policy_decisions": evidence.get("policy_decisions", [])
         if isinstance(evidence, dict)
         else [],
-        "node_statuses": evidence.get("node_statuses", [])
-        if isinstance(evidence, dict)
-        else [],
-        "critic_actions": evidence.get("critic_actions", [])
-        if isinstance(evidence, dict)
-        else [],
+        "node_statuses": evidence.get("node_statuses", []) if isinstance(evidence, dict) else [],
+        "critic_actions": evidence.get("critic_actions", []) if isinstance(evidence, dict) else [],
         "request_payload_stats": evidence.get("request_payload_stats", [])
         if isinstance(evidence, dict)
         else [],
@@ -2573,9 +2892,7 @@ def _write_evidence_index(run_root: Path, output_json: Path) -> dict[str, Any]:
         "failed": sum(1 for item in cases if item.get("status") == "failed"),
         "skipped": sum(1 for item in cases if item.get("status") == "skipped"),
         "summary": {
-            "by_status": _count_case_values(
-                cases, lambda case: [case.get("status", "unknown")]
-            ),
+            "by_status": _count_case_values(cases, lambda case: [case.get("status", "unknown")]),
             "by_scenario": _count_case_values(
                 cases,
                 lambda case: [case.get("scenario_id", "unknown")],
@@ -4356,7 +4673,9 @@ def _dashboard_regression_commands(
             }
         )
 
-    for target, count in sorted((dashboard_summary.get("by_promotion_source_target") or {}).items()):
+    for target, count in sorted(
+        (dashboard_summary.get("by_promotion_source_target") or {}).items()
+    ):
         if not str(target).strip():
             continue
         command = _dashboard_query_command(
@@ -4379,7 +4698,9 @@ def _dashboard_regression_commands(
         permission = str(permission).strip()
         if not permission:
             continue
-        command = _dashboard_query_command("evidence-permission", _dashboard_filter_value(permission))
+        command = _dashboard_query_command(
+            "evidence-permission", _dashboard_filter_value(permission)
+        )
         if command in seen:
             continue
         seen.add(command)
@@ -4767,9 +5088,7 @@ def _has_skill_promotion_coverage_evidence(case: dict[str, Any]) -> bool:
     if not isinstance(learning, dict):
         return False
     used_or_lifecycle_skills = set(_string_values(case.get("used_skills")))
-    used_or_lifecycle_skills.update(
-        _learning_values(case, "skill_lifecycle_records", "skill_name")
-    )
+    used_or_lifecycle_skills.update(_learning_values(case, "skill_lifecycle_records", "skill_name"))
     for lineage in learning.get("skill_lineages", []):
         if not isinstance(lineage, dict):
             continue
@@ -5500,6 +5819,19 @@ def build_evidence_dashboard(
                 limit=limit,
             ),
         },
+        "learning_feedback_cases": {
+            "title": "Learning Feedback Cases",
+            "description": "集中查看 task-ending learning feedback evidence，确认连续任务中的生成、复用、解释和治理提示进入回归消费入口。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "learning_feedbacks",
+            ),
+            "query": query_evidence_index(
+                payload,
+                learning_kinds=["learning_feedbacks"],
+                limit=limit,
+            ),
+        },
         "learning_governance_cases": {
             "title": "Learning Governance Cases",
             "description": "集中查看 procedure / habit / skill 生命周期、review、disable、enable、deprecate 和 reactivate evidence，确认用户可治理的学习对象进入回归视图。",
@@ -5840,24 +6172,16 @@ def build_evidence_dashboard(
             "by_procedure": all_cases["summary"]["by_procedure"],
             "by_habit": all_cases["summary"]["by_habit"],
             "by_lineage_skill": all_cases["summary"]["by_lineage_skill"],
-            "by_promotion_generation_type": all_cases["summary"][
-                "by_promotion_generation_type"
-            ],
-            "by_promotion_source_target": all_cases["summary"][
-                "by_promotion_source_target"
-            ],
+            "by_promotion_generation_type": all_cases["summary"]["by_promotion_generation_type"],
+            "by_promotion_source_target": all_cases["summary"]["by_promotion_source_target"],
             "by_permission": all_cases["summary"]["by_permission"],
             "by_completion_layer": all_cases["summary"]["by_completion_layer"],
             "by_policy_decision": all_cases["summary"]["by_policy_decision"],
             "by_skipped_stage": all_cases["summary"]["by_skipped_stage"],
             "by_policy_risk_flag": all_cases["summary"]["by_policy_risk_flag"],
             "by_policy_reason": all_cases["summary"]["by_policy_reason"],
-            "by_policy_context_budget": all_cases["summary"][
-                "by_policy_context_budget"
-            ],
-            "by_request_payload_stats": all_cases["summary"][
-                "by_request_payload_stats"
-            ],
+            "by_policy_context_budget": all_cases["summary"]["by_policy_context_budget"],
+            "by_request_payload_stats": all_cases["summary"]["by_request_payload_stats"],
             "by_node_status": all_cases["summary"]["by_node_status"],
             "by_critic_action": all_cases["summary"]["by_critic_action"],
             "by_memory_retrieval": all_cases["summary"]["by_memory_retrieval"],
@@ -5865,9 +6189,7 @@ def build_evidence_dashboard(
             "by_learning_kind": all_cases["summary"]["by_learning_kind"],
             "by_learning_validation": all_cases["summary"]["by_learning_validation"],
             "by_skill_validation": all_cases["summary"]["by_skill_validation"],
-            "by_learning_review_decision": all_cases["summary"][
-                "by_learning_review_decision"
-            ],
+            "by_learning_review_decision": all_cases["summary"]["by_learning_review_decision"],
             "by_learning_audit_event": all_cases["summary"]["by_learning_audit_event"],
             "repair_entrypoint_count": len(repair_entrypoints),
             "regression_command_count": len(regression_commands),
@@ -6054,6 +6376,7 @@ def render_evidence_dashboard_markdown(payload: dict[str, Any]) -> str:
         "habit_fast_path_cases",
         "learning_match_explanation_cases",
         "learning_gate_cases",
+        "learning_feedback_cases",
         "learning_governance_cases",
         "learning_history_cases",
         "learning_approval_cases",
@@ -6384,7 +6707,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help=(
             "Filter evidence query by learning evidence kind "
-            "(procedure_matches, habit_fast_paths, experience_records, "
+            "(procedure_matches, habit_fast_paths, experience_records, learning_feedbacks, "
             "procedure_memory_records, skill_lineages, skill_lifecycle_records)"
         ),
     )
