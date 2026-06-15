@@ -9,7 +9,7 @@
 
 `BASECAP-001` 已完成。此前因本任务设置的路线图冻结解除，后续工作恢复按 `ROADMAP.md` 和 `issue.md` 排序推进。
 
-当前首要问题已切换为 [`CAP-EVAL-001` 复杂能力评测前置升级](./COMPLEX_CAPABILITY_EVAL_UPGRADE.md)。本文件只保留 `BASECAP-001` 的完成记录。
+`BASECAP-001` 完成后，项目曾切换到 [`CAP-EVAL-001` 复杂能力评测前置升级](./COMPLEX_CAPABILITY_EVAL_UPGRADE.md)。该后续专项也已完成；当前项目主线以 `ROADMAP.md` 和 `issue.md` 为准。本文件只保留 `BASECAP-001` 的完成记录。
 
 后续标准基础能力扩展已在 [`BASECAP-002` 标准基础能力库 v1](./BASIC_CAPABILITIES_V1_UPGRADE.md) 首批落地，覆盖 SQLite / Markdown / Git 只读 / HTML / Archive / Config。
 
@@ -71,7 +71,7 @@ OmniAgent 的三阶段 MVP 和 P0 补丁轮已经完成，核心 runtime、Plann
 - 补充 `BASECAP-001` 所需测试和文档
 - 修正会导致新增 builtin skill 无法注册、选择、执行或验证的问题
 
-注意：以上仅描述 `BASECAP-001` 专项期间的历史冻结。当前 P0 冻结以 `ROADMAP.md` 和 `issue.md` 中的 `CAP-EVAL-001` 为准。
+注意：以上仅描述 `BASECAP-001` 专项期间的历史冻结。当前主线和优先级以 `ROADMAP.md`、`issue.md` 与 `docs/doc-registry.md` 为准。
 
 ## 阶段 0：基础修补 ✅ 已完成
 
@@ -347,4 +347,4 @@ Action：
 
 ## 当前下一步
 
-`BASECAP-001` 已结束。该专项的完成记录到此归档；当前后续排序以 `ROADMAP.md` 中的 `CAP-EVAL-001` 为准。
+`BASECAP-001` 已结束。该专项的完成记录到此归档；当前后续排序以 `ROADMAP.md`、`issue.md` 与 `docs/doc-registry.md` 为准。

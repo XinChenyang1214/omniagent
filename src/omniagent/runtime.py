@@ -6,12 +6,15 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from omniagent.agent_state import AgentStateStore
 from omniagent.completion_evaluator import CompletionEvaluator
+from omniagent.config import SandboxConfig
 from omniagent.critic import Critic
 from omniagent.errors import ErrorCode, OmniAgentError
 from omniagent.events import EventBus
 from omniagent.execution_engine import ExecutionEngine
 from omniagent.execution_policy import ExecutionPolicy
+from omniagent.experience import ExperienceRecordWriter
 from omniagent.graph_memory import GraphMemoryStore
 from omniagent.hybrid_memory import HybridMemoryRetriever
 from omniagent.logging_utils import get_logger
@@ -35,12 +38,12 @@ from omniagent.models import (
 )
 from omniagent.permissions import PermissionManager
 from omniagent.planner import Planner
+from omniagent.procedure_memory import ProcedureMemoryStore
 from omniagent.skill_registry import filter_skill_registry_entries_for_planner
 from omniagent.skill_lifecycle import SkillLifecycleManager
 from omniagent.storage import SQLiteStore
 from omniagent.workflow_compiler import WorkflowCompiler
 from omniagent.workspace import TaskArtifactManager, WorkspaceManager
-from omniagent.config import SandboxConfig
 
 
 def should_evaluate_task_critic(
@@ -95,6 +98,9 @@ class EmbeddedRuntime:
         hybrid_memory: HybridMemoryRetriever,
         workflow_compiler: WorkflowCompiler,
         skill_lifecycle: SkillLifecycleManager,
+        agent_state: AgentStateStore,
+        experience_writer: ExperienceRecordWriter,
+        procedure_memory: ProcedureMemoryStore,
         planner: Planner,
         critic: Critic,
         completion_evaluator: CompletionEvaluator,
@@ -110,6 +116,9 @@ class EmbeddedRuntime:
         self.hybrid_memory = hybrid_memory
         self.workflow_compiler = workflow_compiler
         self.skill_lifecycle = skill_lifecycle
+        self.agent_state = agent_state
+        self.experience_writer = experience_writer
+        self.procedure_memory = procedure_memory
         self.planner = planner
         self.critic = critic
         self.completion_evaluator = completion_evaluator
@@ -152,6 +161,10 @@ class EmbeddedRuntime:
         self.store.create_task(task)
         self.graph_memory.record_task(task)
         task_dir = self.artifact_manager.initialize_task(task, request, bootstrap)
+        self.artifact_manager.write_procedure_match(
+            task_dir,
+            context_bundle["procedure_match"],
+        )
         self._emit(event_bus, task.task_id, "task.created", task.status, {"goal": task.goal})
 
         task.status = TaskStatus.PLANNING
@@ -174,6 +187,7 @@ class EmbeddedRuntime:
         policy_decision = self.execution_policy.decide(
             request,
             skill_registry_entries=skill_registry_entries,
+            habit_fast_path=context_bundle["habit_fast_path"],
             context_counts=self._policy_context_counts(
                 context_bundle=context_bundle,
                 workflow_summaries=workflow_summaries,
@@ -181,7 +195,14 @@ class EmbeddedRuntime:
                 planner_skill_registry_entries=planner_skill_registry_entries,
             ),
         )
-        self.artifact_manager.write_policy_decision(task_dir, policy_decision.to_dict())
+        policy_payload = policy_decision.to_dict()
+        policy_payload["agent_state_summary"] = context_bundle["agent_state_summary"]
+        habit_fast_path = (
+            policy_payload.get("habit_fast_path") or context_bundle["habit_fast_path"]
+        )
+        policy_payload["habit_fast_path"] = habit_fast_path
+        self.artifact_manager.write_habit_fast_path(task_dir, habit_fast_path)
+        self.artifact_manager.write_policy_decision(task_dir, policy_payload)
         if policy_decision.policy_decision == "direct_execute":
             planner_result = policy_decision.to_plan_result(request)
             self.artifact_manager.write_plan(task_dir, planner_result)
@@ -235,6 +256,8 @@ class EmbeddedRuntime:
                 skill_registry_entries=planner_skill_registry_entries,
                 conversation_history=conversation_history,
                 bootstrap_documents=docs_for_prompt,
+                agent_state_summary=context_bundle["agent_state_summary"],
+                procedure_match=context_bundle["procedure_match"],
                 recent_task_artifacts=recent_task_artifacts,
             )
         except OmniAgentError as exc:
@@ -244,6 +267,7 @@ class EmbeddedRuntime:
                 task_dir=task_dir,
                 error=exc,
                 event_bus=event_bus,
+                context_bundle=context_bundle,
             )
         self.artifact_manager.write_llm_call(
             task_dir,
@@ -261,6 +285,8 @@ class EmbeddedRuntime:
                 recall_explanations=context_bundle["recall_explanations"],
                 skill_registry_entries=planner_skill_registry_entries,
                 conversation_history=conversation_history,
+                agent_state_summary=context_bundle["agent_state_summary"],
+                procedure_match=context_bundle["procedure_match"],
                 recent_task_artifacts=recent_task_artifacts,
             ),
         )
@@ -279,6 +305,7 @@ class EmbeddedRuntime:
                 task_dir=task_dir,
                 planner_result=planner_result,
                 event_bus=event_bus,
+                context_bundle=context_bundle,
             )
 
         task.graph_id = planner_result.graph.graph_id
@@ -322,6 +349,7 @@ class EmbeddedRuntime:
         task_dir: Any,
         error: OmniAgentError,
         event_bus: EventBus,
+        context_bundle: dict[str, Any],
     ) -> TaskExecutionReport:
         """Record planner-stage failures as normal failed tasks.
 
@@ -375,6 +403,16 @@ class EmbeddedRuntime:
             task_graph=None,
             critic_verdicts=[],
         )
+        self._write_experience_record(
+            task=task,
+            request=request,
+            task_dir=task_dir,
+            result=result,
+            task_graph=None,
+            critic_verdicts=[],
+            completion_evaluation=None,
+            context_bundle=context_bundle,
+        )
         events = self.store.list_events(task.task_id)
         self.logger.warning(
             "task_failed_during_planning",
@@ -400,6 +438,7 @@ class EmbeddedRuntime:
         task_dir: Any,
         planner_result: PlanResult,
         event_bus: EventBus,
+        context_bundle: dict[str, Any],
     ) -> TaskExecutionReport:
         """META-003 short-circuit path.
 
@@ -513,6 +552,16 @@ class EmbeddedRuntime:
             task_graph=empty_graph,
             critic_verdicts=[],
         )
+        self._write_experience_record(
+            task=task,
+            request=request,
+            task_dir=task_dir,
+            result=result,
+            task_graph=empty_graph,
+            critic_verdicts=[],
+            completion_evaluation=None,
+            context_bundle=context_bundle,
+        )
         # Persist a lightweight task-memory entry so later recalls know
         # this request was handled by a planner decision (not a successful
         # graph execution) — prevents the "decline" from being pulled back
@@ -566,6 +615,21 @@ class EmbeddedRuntime:
         task_dir = self.artifact_manager.task_dir(task.task_id)
         self.artifact_manager.write_request_snapshot(task_dir, request)
         context_bundle = self._build_context_bundle(request)
+        self.artifact_manager.write_procedure_match(
+            task_dir,
+            context_bundle["procedure_match"],
+        )
+        habit_fast_path = dict(context_bundle["habit_fast_path"])
+        habit_fast_path["policy_gate"] = {
+            "result": "existing_graph_execution",
+            "policy_decision": "not_recomputed",
+            "reason": "resume_existing_task_graph",
+            "permission_gate_preserved": True,
+            "contract_gate_preserved": True,
+            "risk_gate_preserved": True,
+        }
+        habit_fast_path["skipped_stages"] = []
+        self.artifact_manager.write_habit_fast_path(task_dir, habit_fast_path)
         self._emit(event_bus, task.task_id, "task.resumed", task.status, {"task_id": task.task_id})
         return self._execute_task_graph(
             task=task,
@@ -633,6 +697,7 @@ class EmbeddedRuntime:
             graph_skill_matches=context_bundle["graph_skill_matches"],
             graph_failure_patterns=context_bundle["graph_failure_patterns"],
             hybrid_recall=context_bundle["hybrid_recall"],
+            agent_state_summary=context_bundle["agent_state_summary"],
         )
 
         try:
@@ -838,6 +903,16 @@ class EmbeddedRuntime:
             critic_verdicts=critic_verdicts,
             completion_evaluation=completion_evaluation,
         )
+        self._write_experience_record(
+            task=task,
+            request=request,
+            task_dir=task_dir,
+            result=result,
+            task_graph=task_graph,
+            critic_verdicts=critic_verdicts,
+            completion_evaluation=completion_evaluation,
+            context_bundle=context_bundle,
+        )
 
         if final_status not in {TaskStatus.WAITING_INPUT, TaskStatus.SUSPENDED}:
             plan_snapshot = planner_result or PlanResult(
@@ -919,6 +994,97 @@ class EmbeddedRuntime:
             completion_evaluation=completion_evaluation,
         )
 
+    def _write_experience_record(
+        self,
+        *,
+        task: Task,
+        request: TaskRequest,
+        task_dir: Any,
+        result: ExecutionResult,
+        task_graph: TaskGraph | None,
+        critic_verdicts: list[CriticVerdict],
+        completion_evaluation: CompletionEvaluation | None,
+        context_bundle: dict[str, Any],
+    ) -> None:
+        try:
+            record = self.experience_writer.write(
+                task=task,
+                request=request,
+                task_dir=Path(task_dir),
+                result=result,
+                task_graph=task_graph,
+                critic_verdicts=critic_verdicts,
+                completion_evaluation=completion_evaluation,
+                agent_state_summary=context_bundle.get("agent_state_summary", {}),
+                permissions=self.store.list_permissions(task.task_id),
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning(
+                "experience_record_write_failed",
+                extra={"task_id": task.task_id, "error": str(exc)},
+            )
+            return
+        try:
+            matched_procedure_updated = self._update_matched_procedure_from_experience(
+                task=task,
+                result=result,
+                record=record,
+                context_bundle=context_bundle,
+            )
+            if not matched_procedure_updated:
+                self.procedure_memory.extract_draft_from_experience(record)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning(
+                "procedure_learning_update_failed",
+                extra={"task_id": task.task_id, "error": str(exc)},
+            )
+
+    def _update_matched_procedure_from_experience(
+        self,
+        *,
+        task: Task,
+        result: ExecutionResult,
+        record: dict[str, Any],
+        context_bundle: dict[str, Any],
+    ) -> bool:
+        procedure_match = dict(context_bundle.get("procedure_match") or {})
+        if not procedure_match.get("matched"):
+            return False
+        procedure_id = str(procedure_match.get("matched_procedure_id") or "")
+        if not procedure_id:
+            return False
+        procedure = self.procedure_memory.get(procedure_id)
+        if procedure is None:
+            return False
+
+        status = str(procedure.get("status") or "draft")
+        validation = dict(record.get("validation") or {})
+        evidence_refs = [str(item) for item in list(validation.get("evidence_refs") or [])]
+        if validation.get("verdict") == "passed" and result.success:
+            if status in {"verified", "habit"}:
+                self.procedure_memory.record_validator_success(
+                    procedure_id,
+                    evidence_refs=evidence_refs,
+                    experience_id=str(record.get("experience_id") or ""),
+                    task_id=task.task_id,
+                    note="matched procedure succeeded with validation evidence",
+                )
+            return True
+
+        if status in {"verified", "habit"}:
+            evidence_ref = (
+                evidence_refs[0]
+                if evidence_refs
+                else f"tasks/{task.task_id}/experience/experience_record.json"
+            )
+            reason = str(validation.get("notes") or result.message or "matched procedure failed validation")
+            self.procedure_memory.record_validator_failure(
+                procedure_id,
+                evidence_ref=evidence_ref,
+                reason=reason,
+            )
+        return True
+
     def _policy_context_counts(
         self,
         *,
@@ -938,6 +1104,9 @@ class EmbeddedRuntime:
             "workflow_matches": stats(workflow_summaries),
             "vector_matches": stats(vector_matches),
             "planner_skill_registry_entries": stats(planner_skill_registry_entries),
+            "agent_state_summary": stats(context_bundle["agent_state_summary"]),
+            "procedure_match": stats(context_bundle["procedure_match"]),
+            "habit_fast_path": stats(context_bundle["habit_fast_path"]),
         }
 
     def _json_chars(self, value: Any) -> int:
@@ -1166,9 +1335,18 @@ class EmbeddedRuntime:
                 vector_count=len(vector_matches),
             )
         failure_patterns = hybrid_recall["failure_patterns"]
+        agent_state_summary = self.agent_state.build_summary(task_goal=request.goal)
+        procedure_match = self.procedure_memory.explain_match(
+            request.goal,
+            agent_state_summary=agent_state_summary,
+        )
+        habit_fast_path = self.procedure_memory.build_habit_fast_path_decision(
+            procedure_match
+        )
         bootstrap = self.workspace_manager.build_bootstrap_context(
             memory_summaries=memory_summaries,
             workflow_summaries=workflow_summaries,
+            agent_state_summary=agent_state_summary,
         )
         return {
             "workspace_paths": workspace_paths,
@@ -1177,6 +1355,9 @@ class EmbeddedRuntime:
             "workflow_summaries": workflow_summaries,
             "vector_matches": vector_matches,
             "failure_patterns": failure_patterns,
+            "agent_state_summary": agent_state_summary,
+            "procedure_match": procedure_match,
+            "habit_fast_path": habit_fast_path,
             "graph_workflow_matches": hybrid_recall["graph_workflow_matches"],
             "graph_skill_matches": hybrid_recall["graph_skill_matches"],
             "graph_failure_patterns": hybrid_recall["graph_failure_patterns"],

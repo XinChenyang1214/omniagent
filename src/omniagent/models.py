@@ -422,6 +422,7 @@ class BootstrapContext:
     documents: dict[str, str]
     memory_summaries: list[dict[str, Any]]
     workflow_summaries: list[dict[str, Any]]
+    agent_state_summary: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -1396,6 +1397,7 @@ class TaskRunContext:
     graph_skill_matches: list[dict[str, Any]] = field(default_factory=list)
     graph_failure_patterns: list[dict[str, Any]] = field(default_factory=list)
     hybrid_recall: dict[str, Any] = field(default_factory=dict)
+    agent_state_summary: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

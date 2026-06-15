@@ -45,6 +45,81 @@
       }
     },
     {
+      "id": "learning_loop_habit_promoted_skill_lineage",
+      "kind": "task",
+      "category": "learning_loop",
+      "setup_files": {
+        "procedures/habits/proc_eval_habit.json": "{\n  \"schema_version\": \"procedure-memory/v1\",\n  \"procedure_id\": \"proc_eval_habit\",\n  \"name\": \"eval report writer\",\n  \"status\": \"habit\",\n  \"risk_level\": \"low\",\n  \"required_permissions\": [\"filesystem.write\"],\n  \"trigger\": {\"task_patterns\": [\"write eval report\"], \"required_context\": [], \"negative_patterns\": []},\n  \"inputs\": [],\n  \"steps\": [{\"step_id\": \"step_1\", \"action_type\": \"skill\", \"target\": \"builtin.file.basic\", \"input_template\": {}, \"expected_output\": \"write report\", \"fallback\": \"fallback_to_planner\"}],\n  \"outputs\": [{\"kind\": \"file\", \"description\": \"report\", \"artifact_ref\": \"reports/learning_loop.md\"}],\n  \"validator\": {\"method\": \"completion_eval\", \"required_evidence\": [\"tasks/task_eval/completion/evaluation.json\"], \"failure_behavior\": \"downgrade\"},\n  \"source_experience_ids\": [\"exp_eval_habit\"],\n  \"source_task_ids\": [\"task_eval\"],\n  \"success_count\": 3,\n  \"failure_count\": 0,\n  \"confidence\": 0.8,\n  \"updated_at\": \"2026-06-12T00:00:00+00:00\"\n}\n",
+        "skills/managed/generated.habit.eval_report/skill.yaml": "{\n  \"name\": \"generated.habit.eval_report\",\n  \"version\": \"0.0.1\",\n  \"description\": \"Eval habit promoted file skill\",\n  \"input_schema\": {\"action\": \"string\", \"path\": \"string\", \"content\": \"string\", \"overwrite\": \"boolean\"},\n  \"output_schema\": {\"path\": \"string\", \"size\": \"integer\"},\n  \"permission_requirements\": [\"filesystem.write\"],\n  \"dependency_requirements\": [],\n  \"side_effects\": [],\n  \"sandbox_level\": \"workspace\",\n  \"tags\": [\"generated\", \"habit-promoted\", \"file\", \"active\"],\n  \"source_relation\": {\"kind\": \"habit_promoted\", \"procedure_id\": \"proc_eval_habit\", \"habit_id\": \"proc_eval_habit\", \"source_experience_ids\": [\"exp_eval_habit\"], \"validator_evidence_refs\": [\"tasks/task_eval/completion/evaluation.json\"]},\n  \"contracts\": [{\"action\": \"write\", \"description\": \"Write a workspace text file from a habit-promoted skill.\", \"input_fields\": [{\"name\": \"action\", \"type\": \"string\", \"required\": true}, {\"name\": \"path\", \"type\": \"string\", \"required\": true}, {\"name\": \"content\", \"type\": \"string\", \"required\": true}, {\"name\": \"overwrite\", \"type\": \"boolean\", \"required\": false}], \"output_fields\": [{\"name\": \"path\", \"type\": \"string\"}, {\"name\": \"size\", \"type\": \"integer\"}], \"side_effects\": [\"filesystem.write\"]}]\n}\n",
+        "skills/managed/generated.habit.eval_report/main.py": "from __future__ import annotations\n\n\ndef run(payload, context):\n    sandbox = context['sandbox']\n    action = str(payload.get('action', '')).strip().lower()\n    if action != 'write':\n        raise ValueError(f'unsupported action: {action}')\n    path = str(payload.get('path', ''))\n    if not path:\n        raise ValueError('path is required')\n    content = str(payload.get('content', ''))\n    written = sandbox.write_text(path, content, overwrite=bool(payload.get('overwrite', False)))\n    return {'success': True, 'status': 'completed', 'message': f'wrote {path}', 'output': {'path': path, 'size': len(content), 'written_path': str(written)}}\n",
+        "skills/managed/generated.habit.eval_report/lineage.json": "{\n  \"kind\": \"habit_promoted\",\n  \"procedure_id\": \"proc_eval_habit\",\n  \"habit_id\": \"proc_eval_habit\",\n  \"source_experience_ids\": [\"exp_eval_habit\"],\n  \"source_task_ids\": [\"task_eval\"],\n  \"validator_evidence_refs\": [\"tasks/task_eval/completion/evaluation.json\"],\n  \"skill_name\": \"generated.habit.eval_report\",\n  \"skill_version\": \"0.0.1\"\n}\n"
+      },
+      "goal": "Use the habit-promoted skill to write reports/learning_loop.md containing learning_loop: promoted_skill and lineage: preserved.",
+      "expected_output": "reports/learning_loop.md contains learning_loop: promoted_skill and lineage: preserved, and the run uses generated.habit.eval_report.",
+      "skill": "generated.habit.eval_report",
+      "payload": {
+        "action": "write",
+        "path": "reports/learning_loop.md",
+        "content": "learning_loop: promoted_skill\nlineage: preserved\n",
+        "overwrite": true
+      },
+      "max_permission": "L2",
+      "timeout": 90,
+      "assertions": {
+        "must_succeed": true,
+        "file_exists": [
+          "procedures/habits/proc_eval_habit.json",
+          "skills/managed/generated.habit.eval_report/lineage.json"
+        ],
+        "file_contains": [
+          {"path": "reports/learning_loop.md", "text": "learning_loop: promoted_skill"},
+          {"path": "reports/learning_loop.md", "text": "lineage: preserved"},
+          {"path": "skills/managed/generated.habit.eval_report/lineage.json", "text": "\"habit_id\": \"proc_eval_habit\""},
+          {"path": "skills/managed/generated.habit.eval_report/lineage.json", "text": "\"source_experience_ids\""}
+        ],
+        "required_skill_any": ["generated.habit.eval_report"],
+        "forbidden_skill_any": ["builtin.shell.safe", "builtin.python.basic"]
+      }
+    },
+    {
+      "id": "learning_loop_jsonl_habit_promoted_skill_lineage",
+      "kind": "task",
+      "category": "learning_loop",
+      "setup_files": {
+        "inputs/events.jsonl": "{\"user\": {\"name\": \"Ada\"}, \"event\": \"created\"}\n{\"user\": {\"name\": \"Grace\"}, \"event\": \"reviewed\"}\n",
+        "procedures/habits/proc_eval_jsonl_habit.json": "{\n  \"schema_version\": \"procedure-memory/v1\",\n  \"procedure_id\": \"proc_eval_jsonl_habit\",\n  \"name\": \"eval JSONL event reporter\",\n  \"status\": \"habit\",\n  \"risk_level\": \"low\",\n  \"required_permissions\": [\"filesystem.read\", \"filesystem.write\"],\n  \"trigger\": {\"task_patterns\": [\"summarize jsonl events\"], \"required_context\": [], \"negative_patterns\": []},\n  \"inputs\": [],\n  \"steps\": [{\"step_id\": \"step_1\", \"action_type\": \"skill\", \"target\": \"jsonl\", \"input_template\": {}, \"expected_output\": \"jsonl report\", \"fallback\": \"fallback_to_planner\"}],\n  \"outputs\": [{\"kind\": \"file\", \"description\": \"JSONL event report\", \"artifact_ref\": \"reports/jsonl_event_names.md\"}],\n  \"validator\": {\"method\": \"completion_eval\", \"required_evidence\": [\"tasks/task_jsonl_source/completion/evaluation.json\"], \"failure_behavior\": \"downgrade\"},\n  \"source_experience_ids\": [\"exp_eval_jsonl_habit\"],\n  \"source_task_ids\": [\"task_jsonl_source\"],\n  \"success_count\": 3,\n  \"failure_count\": 0,\n  \"confidence\": 0.8,\n  \"updated_at\": \"2026-06-13T00:00:00+00:00\"\n}\n",
+        "skills/managed/generated.habit.eval_jsonl_events/skill.yaml": "{\n  \"name\": \"generated.habit.eval_jsonl_events\",\n  \"version\": \"0.0.1\",\n  \"description\": \"Eval habit promoted JSONL data skill\",\n  \"input_schema\": {\"action\": \"string\", \"path\": \"string\", \"fields\": \"array\", \"output_path\": \"string\", \"overwrite\": \"boolean\"},\n  \"output_schema\": {\"valid\": \"boolean\", \"value\": \"object\", \"formatted\": \"string\", \"line_count\": \"integer\", \"errors\": \"array\", \"path\": \"string\", \"source_path\": \"string\"},\n  \"permission_requirements\": [\"filesystem.read\", \"filesystem.write\"],\n  \"dependency_requirements\": [],\n  \"side_effects\": [\"filesystem.write\"],\n  \"sandbox_level\": \"workspace\",\n  \"tags\": [\"generated\", \"habit-promoted\", \"json\", \"jsonl\", \"active\"],\n  \"source_relation\": {\"kind\": \"habit_promoted\", \"procedure_id\": \"proc_eval_jsonl_habit\", \"habit_id\": \"proc_eval_jsonl_habit\", \"source_experience_ids\": [\"exp_eval_jsonl_habit\"], \"validator_evidence_refs\": [\"tasks/task_jsonl_source/completion/evaluation.json\"], \"source_targets\": [\"jsonl\"]},\n  \"contracts\": [{\"action\": \"report_lines\", \"description\": \"Extract JSONL fields and write a label-value report.\", \"input_fields\": [{\"name\": \"action\", \"type\": \"string\", \"required\": true}, {\"name\": \"path\", \"type\": \"string\", \"required\": false}, {\"name\": \"fields\", \"type\": \"array\", \"required\": false}, {\"name\": \"query\", \"type\": \"string\", \"required\": false}, {\"name\": \"label\", \"type\": \"string\", \"required\": false}, {\"name\": \"output_path\", \"type\": \"string\", \"required\": true}, {\"name\": \"overwrite\", \"type\": \"boolean\", \"required\": false}], \"output_fields\": [{\"name\": \"valid\", \"type\": \"boolean\"}, {\"name\": \"value\", \"type\": \"object\"}, {\"name\": \"formatted\", \"type\": \"string\"}, {\"name\": \"line_count\", \"type\": \"integer\"}, {\"name\": \"errors\", \"type\": \"array\"}, {\"name\": \"path\", \"type\": \"string\"}, {\"name\": \"source_path\", \"type\": \"string\"}], \"side_effects\": [\"filesystem.write\"]}]\n}\n",
+        "skills/managed/generated.habit.eval_jsonl_events/main.py": "from __future__ import annotations\n\nimport json\n\n\ndef _split_path(path):\n    return [part for part in str(path).split('.') if part]\n\n\ndef _get_path(value, path):\n    current = value\n    for part in _split_path(path):\n        if isinstance(current, dict):\n            current = current[part]\n        elif isinstance(current, list):\n            current = current[int(part)]\n        else:\n            raise KeyError(part)\n    return current\n\n\ndef _format_value(value):\n    if isinstance(value, str):\n        return value\n    if isinstance(value, (int, float, bool)) or value is None:\n        return str(value)\n    return json.dumps(value, ensure_ascii=False, separators=(',', ':'))\n\n\ndef _normalize_fields(payload):\n    fields = payload.get('fields')\n    if not fields:\n        query = str(payload.get('query') or '').strip()\n        if not query:\n            raise ValueError('json.report_lines requires fields or query')\n        return [{'label': str(payload.get('label') or query), 'query': query}]\n    normalized = []\n    for item in fields:\n        query = str(item.get('query') or item.get('path') or '').strip()\n        if not query:\n            raise ValueError('json.report_lines field requires query')\n        normalized.append({'label': str(item.get('label') or item.get('name') or query), 'query': query})\n    return normalized\n\n\ndef run(payload, context):\n    sandbox = context['sandbox']\n    action = str(payload.get('action', '')).strip().lower()\n    if action != 'report_lines':\n        raise ValueError(f'unsupported action: {action}')\n    path = str(payload.get('path') or '').strip()\n    output_path = str(payload.get('output_path') or '').strip()\n    if not path or not output_path:\n        raise ValueError('json.report_lines requires path and output_path')\n    rows = [json.loads(line) for line in sandbox.read_text(path).splitlines() if line.strip()]\n    values = {}\n    lines = []\n    for field in _normalize_fields(payload):\n        field_values = [_get_path(row, field['query']) for row in rows]\n        values[field['label']] = field_values\n        lines.append(f\"{field['label']}: {', '.join(_format_value(value) for value in field_values)}\")\n    content = '\\n'.join(lines) + '\\n'\n    sandbox.write_text(output_path, content, overwrite=bool(payload.get('overwrite', True)))\n    return {'success': True, 'status': 'completed', 'message': f'JSON lines report written: {output_path}', 'output': {'valid': True, 'value': values, 'formatted': content, 'line_count': len(rows), 'errors': [], 'path': output_path, 'source_path': path}}\n",
+        "skills/managed/generated.habit.eval_jsonl_events/lineage.json": "{\n  \"kind\": \"habit_promoted\",\n  \"procedure_id\": \"proc_eval_jsonl_habit\",\n  \"habit_id\": \"proc_eval_jsonl_habit\",\n  \"generation_type\": \"json\",\n  \"source_targets\": [\"jsonl\"],\n  \"source_experience_ids\": [\"exp_eval_jsonl_habit\"],\n  \"source_task_ids\": [\"task_jsonl_source\"],\n  \"validator_evidence_refs\": [\"tasks/task_jsonl_source/completion/evaluation.json\"],\n  \"skill_name\": \"generated.habit.eval_jsonl_events\",\n  \"skill_version\": \"0.0.1\"\n}\n"
+      },
+      "goal": "Use the JSONL habit-promoted skill to read inputs/events.jsonl and write reports/jsonl_event_names.md with names: Ada, Grace.",
+      "expected_output": "reports/jsonl_event_names.md contains names: Ada, Grace, and the run uses generated.habit.eval_jsonl_events with JSONL lineage.",
+      "skill": "generated.habit.eval_jsonl_events",
+      "payload": {
+        "action": "report_lines",
+        "path": "inputs/events.jsonl",
+        "fields": [{"label": "names", "query": "user.name"}],
+        "output_path": "reports/jsonl_event_names.md",
+        "overwrite": true
+      },
+      "max_permission": "L2",
+      "timeout": 90,
+      "assertions": {
+        "must_succeed": true,
+        "file_exists": [
+          "procedures/habits/proc_eval_jsonl_habit.json",
+          "skills/managed/generated.habit.eval_jsonl_events/lineage.json"
+        ],
+        "file_contains": [
+          {"path": "reports/jsonl_event_names.md", "text": "names: Ada, Grace"},
+          {"path": "skills/managed/generated.habit.eval_jsonl_events/lineage.json", "text": "\"generation_type\": \"json\""},
+          {"path": "skills/managed/generated.habit.eval_jsonl_events/lineage.json", "text": "\"source_targets\": [\"jsonl\"]"}
+        ],
+        "required_skill_any": ["generated.habit.eval_jsonl_events"],
+        "forbidden_skill_any": ["builtin.shell.safe", "builtin.python.basic"]
+      }
+    },
+    {
       "id": "csv_sales_summary",
       "kind": "task",
       "category": "data",

@@ -1,13 +1,13 @@
 # OmniAgent
 
-OmniAgent 是一个以 **task** 为中心的本地嵌入式 Agent Runtime。它提供从多轮对话、任务规划执行、混合记忆、能力沉淀到安全治理的完整闭环。
+OmniAgent 当前代码基础是一个以 **task** 为中心的本地嵌入式 Agent Runtime。自 2026-06-11 起，项目按 [`docs/product-architecture.md`](./docs/product-architecture.md) 重新开发为以学习循环为中心的个人 Agent OS；现有 runtime 将作为 Execution Runtime 下沉复用。
 
 - **单用户、单机、CLI 优先**
 - **面向开发者**，可调试、可审计、可演化
 - **轻量本地运行时**（stdlib 核心 + 默认本地 embedding 依赖 + OpenAI 兼容 LLM）
 - **LLM 驱动**的规划、评估、对话路由、代码合成
 
-## 核心能力
+## 当前代码能力
 
 - **任务中心 Runtime** — TaskGraph DAG 执行，支持 retry/degrade/replan 动态恢复
 - **多轮对话入口** — `chat repl` 持续会话，thread/checkpoint 绑定，自然语言回复
@@ -133,6 +133,7 @@ REPL 内置命令：
 - `/show` — 查看线程详情
 - `/switch <thread_id>` — 切换线程
 - `/resume <thread_id>` — 恢复挂起的线程
+- `/state [profile|preferences|project|goal]` — 查看 Agent state
 - `/exit` — 退出
 
 ## 常用 CLI 命令
@@ -147,16 +148,84 @@ poetry run omniagent --workspace ./workspace chat send "帮我写一个文件" -
 poetry run omniagent --workspace ./workspace chat list --status active
 poetry run omniagent --workspace ./workspace chat show <thread_id>
 
+# Agent state
+poetry run omniagent --workspace ./workspace state show
+poetry run omniagent --workspace ./workspace state show --section goal --json
+
+# Procedure memory
+poetry run omniagent --workspace ./workspace procedure list
+poetry run omniagent --workspace ./workspace procedure show <procedure_id>
+poetry run omniagent --workspace ./workspace procedure explain-match "写一个报告"
+poetry run omniagent --workspace ./workspace procedure edit <procedure_id> \
+  --patch '{"trigger":{"negative_patterns":["delete"]}}'
+poetry run omniagent --workspace ./workspace procedure review <procedure_id> \
+  --decision approved --evidence-ref manual_review/<procedure_id>.md
+poetry run omniagent --workspace ./workspace procedure promote-habit <procedure_id>
+poetry run omniagent --workspace ./workspace procedure disable <procedure_id>
+
+# Learning governance
+poetry run omniagent --workspace ./workspace learning review
+poetry run omniagent --workspace ./workspace learning review --type experience --json
+poetry run omniagent --workspace ./workspace learning review --type habit --json
+poetry run omniagent --workspace ./workspace learning review --type skill --json
+poetry run omniagent --workspace ./workspace learning show --type experience <experience_id> --json
+poetry run omniagent --workspace ./workspace learning show --type procedure <procedure_id> --json
+poetry run omniagent --workspace ./workspace learning show --type habit <procedure_id> --json
+poetry run omniagent --workspace ./workspace learning show --type skill <skill_name> --json
+poetry run omniagent --workspace ./workspace learning history --type experience <experience_id> --json
+poetry run omniagent --workspace ./workspace learning history --type procedure <procedure_id> --json
+poetry run omniagent --workspace ./workspace learning history --type habit <procedure_id> --json
+poetry run omniagent --workspace ./workspace learning history --type skill <skill_name> --json
+poetry run omniagent --workspace ./workspace learning explain-match "写一个报告" --json
+poetry run omniagent --workspace ./workspace learning edit --type procedure <procedure_id> \
+  --patch '{"name":"updated procedure"}'
+poetry run omniagent --workspace ./workspace learning edit --type habit <procedure_id> \
+  --patch '{"trigger":{"task_patterns":["write validated report"]}}'
+poetry run omniagent --workspace ./workspace learning promote --type procedure <procedure_id>
+poetry run omniagent --workspace ./workspace learning promote --type habit <procedure_id> \
+  --skill-name generated.habit.example
+poetry run omniagent --workspace ./workspace learning validate --type procedure <procedure_id> \
+  --evidence-ref manual_review/<procedure_id>.md
+poetry run omniagent --workspace ./workspace learning validate --type habit <procedure_id> \
+  --evidence-ref manual_review/<procedure_id>.md
+poetry run omniagent --workspace ./workspace learning validate --type skill <skill_name> \
+  --version <version>
+poetry run omniagent --workspace ./workspace learning decay --type procedure <procedure_id> \
+  --note "environment changed"
+poetry run omniagent --workspace ./workspace learning decay --type habit <procedure_id> \
+  --note "stale validator"
+poetry run omniagent --workspace ./workspace learning request-changes --type procedure <procedure_id> \
+  --note "needs narrower trigger"
+poetry run omniagent --workspace ./workspace learning request-changes --type habit <procedure_id> \
+  --note "validator needs update"
+poetry run omniagent --workspace ./workspace learning approve --type procedure <procedure_id> \
+  --evidence-ref manual_review/<procedure_id>.md
+poetry run omniagent --workspace ./workspace learning approve --type skill <skill_name> \
+  --reviewer me --note "approved after review"
+poetry run omniagent --workspace ./workspace learning reject --type procedure <procedure_id> \
+  --note "not reusable"
+poetry run omniagent --workspace ./workspace learning reject --type skill <skill_name> \
+  --reviewer me --note "rejected after review"
+poetry run omniagent --workspace ./workspace learning disable --type procedure <procedure_id> --note "stale"
+poetry run omniagent --workspace ./workspace learning disable --type habit <procedure_id> --note "stale"
+poetry run omniagent --workspace ./workspace learning disable --type skill <skill_name> --note "stale"
+poetry run omniagent --workspace ./workspace learning enable --type procedure <procedure_id> --note "restored"
+poetry run omniagent --workspace ./workspace learning enable --type habit <procedure_id> --note "restored"
+poetry run omniagent --workspace ./workspace learning enable --type skill <skill_name> --note "restored"
+poetry run omniagent --workspace ./workspace learning rollback --type skill <skill_name> \
+  --to-version <version>
+
 # Skill 生命周期
 poetry run omniagent --workspace ./workspace skill list
 poetry run omniagent --workspace ./workspace skill show <skill_name>
 poetry run omniagent --workspace ./workspace skill import ./some-skill
 poetry run omniagent --workspace ./workspace skill generate <skill_name> --type file --goal "..."
+poetry run omniagent --workspace ./workspace skill promote-habit <procedure_id>
 poetry run omniagent --workspace ./workspace skill validate <skill_name>
 poetry run omniagent --workspace ./workspace skill approve <skill_name> --approver me
 poetry run omniagent --workspace ./workspace skill activate <skill_name>
 
-# Workflow 提升为 skill
+# Legacy workflow candidate 确认；不会绕过 habit gate 直接激活 skill
 poetry run omniagent --workspace ./workspace workflow promote <task_id> \
   --skill-name <candidate> --approver me --rationale "..."
 
@@ -178,6 +247,44 @@ zsh -ic 'poetry run python scripts/run_real_world_evals.py --verbose'
 zsh -ic 'poetry run python scripts/run_real_world_evals.py --include-complex --verbose'
 
 # 评测结果写入 eval_runs/<run_id>/，每个 case 生成 diagnostics.md
+
+# 汇总已有 eval_runs 的跨 run evidence 索引（不重新执行评测）
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --build-evidence-index'
+
+# 查询已有 evidence 索引，可按 failure layer / skill / procedure / habit / lineage / scenario / promotion generation type / promotion source target / category / requires / skip reason / permission / completion layer / policy decision / skipped stage / policy risk flag / policy reason / policy context budget / request payload stats / node status / critic action / memory retrieval / LLM usage / learning kind / learning validation / skill validation / review decision / audit event 过滤
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-failure-layer skill_or_tool'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-skill "generated.habit.*" --evidence-output eval_runs/evidence_query.md'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-scenario "learning_loop_jsonl_habit_promoted_skill_lineage"'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-procedure "proc_eval_jsonl_habit"'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-habit "proc_eval_jsonl_habit"'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-lineage-skill "generated.habit.eval_jsonl_events"'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-promotion-generation-type "json"'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-promotion-source-target "tsv"'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-category learning_loop'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-requires network --evidence-status skipped'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-skip-reason "requires --include-network"'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-permission "filesystem.write:*"'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-completion-layer recorded'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-policy-decision direct_execute'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-skipped-stage planner'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-policy-risk-flag planner_context_required'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-policy-reason "*风险标记*"'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-policy-context-budget "skill_registry_entries:json_chars:50000+"'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-request-payload-stats "skill_registry_entries:json_chars:10000-49999"'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-node-status status:failed'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-critic-action action:accept'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-memory-retrieval recorded'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-llm-usage llm_called'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-llm-usage "tokens:10000+,duration:60s+"'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-learning-kind habit_fast_paths'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-learning-validation "*"'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-skill-validation passed'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-learning-review-decision needs_changes'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-learning-audit-event decayed'
+
+# 生成失败修复入口、regression commands（含 eval coverage status / scenario / category / requires / skip reason、used skill、procedure id / habit id、lineage skill、promotion generation type / promotion source target / permission summary / completion layer / policy decision / skipped stage / policy risk flag / policy reason / policy context budget 高水位 / request payload stats 高水位 / node status / critic action / memory retrieval / LLM usage / learning kind / learning validation / skill validation / review decision / audit event 动态查询）、eval coverage、skipped eval、model capability、node execution、critic action、completion evaluation、memory retrieval、LLM usage / runtime cost hotspot、execution policy、Planner skipped、policy risk flag、policy reason、policy context budget、request payload stats、learning match explanation、learning gate、learning governance、learning history、learning approval、learning promotion、learning validation、learning edit、learning request-changes、learning decay、learning disable、learning restore、learning rollback、learning rejection、learning audit gap、skill lifecycle governance、skill promotion coverage、skill approval gate 和 lineage 回归看板（不重新执行评测）
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --evidence-dashboard'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --evidence-dashboard --evidence-dashboard-commands-output eval_runs/evidence_dashboard.commands'
 
 # Lint
 poetry run ruff check src/ tests/
@@ -215,12 +322,18 @@ workspace/
 
 ## 文档
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — 架构概览、模块职责、数据流
+- [docs/README.md](./docs/README.md) — 文档治理入口、阅读顺序和整理规则
+- [docs/doc-registry.md](./docs/doc-registry.md) — 文档类型、状态、权威边界和替代关系登记表
+- [docs/product-architecture.md](./docs/product-architecture.md) — 目标产品架构、学习闭环和 Agent 重新设计方向
+- [AGENT_USABILITY_LEARNING_LOOP_MVP.md](./docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md) — 当前主线：`META-010` Agent usability and learning loop MVP
+- [docs/specs/agent-state.md](./docs/specs/agent-state.md) — Agent state 最小数据契约和验收标准
+- [docs/specs/experience-record.md](./docs/specs/experience-record.md) — 任务经验记录 schema、写入时机和 learning gate
+- [docs/specs/procedure-memory.md](./docs/specs/procedure-memory.md) — procedure / habit 生命周期和升级规则
+- [docs/specs/skill-promotion.md](./docs/specs/skill-promotion.md) — habit -> skill promotion gate、lineage、contract 和权限规则
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — 旧实现架构和迁移输入
 - [CONFIGURATION.md](./CONFIGURATION.md) — 完整配置参考
 - [ROADMAP.md](./ROADMAP.md) — 路线图与优先级
-- [COMPLEX_CAPABILITY_EVAL_UPGRADE.md](./COMPLEX_CAPABILITY_EVAL_UPGRADE.md) — 当前任务：复杂能力评测前置升级
-- [BASIC_CAPABILITIES_UPGRADE.md](./BASIC_CAPABILITIES_UPGRADE.md) — 已完成任务：基础能力升级
-- [BASIC_CAPABILITIES_V1_UPGRADE.md](./BASIC_CAPABILITIES_V1_UPGRADE.md) — 标准基础能力库 v1：SQLite / Markdown / Git / HTML / Archive / Config
+- [pre-product-redesign archive](./docs/archive/pre-product-redesign/) — 重开发前旧阶段过程文档归档
 - [REAL_WORLD_EVAL_PLAN.md](./REAL_WORLD_EVAL_PLAN.md) — 真实场景自主评测闭环
 - [CLAUDE.md](./CLAUDE.md) — 给 AI 编程助手的项目指南
 - [AGENTS.md](./AGENTS.md) — 项目规则
@@ -228,4 +341,4 @@ workspace/
 
 ## 当前状态
 
-代码层面已完成三阶段 MVP、P0 补丁轮、[`BASECAP-001` 基础能力升级](./BASIC_CAPABILITIES_UPGRADE.md)、`REAL-EVAL-005` 第二批真实场景矩阵，并已落地 [`BASECAP-002` 标准基础能力库 v1](./BASIC_CAPABILITIES_V1_UPGRADE.md) 首批能力：SQLite / Markdown / Git 只读 / HTML / Archive / Config。当前 P0 是 [`CAP-EVAL-001` 复杂能力评测前置升级](./COMPLEX_CAPABILITY_EVAL_UPGRADE.md)：任务完成度评估、真实 embedding、runner diagnostics 与 failure attribution 均已落地，下一步启动 `REAL-EVAL-006` 复杂真实场景矩阵。
+代码层面仍保留三阶段 MVP、P0 补丁轮、`BASECAP-001`、`BASECAP-002`、`REAL-EVAL-005`、`CAP-EVAL-001` 和 `META-009` 首轮落地结果作为旧实现基础；相关过程文档已归档到 [`docs/archive/pre-product-redesign/`](./docs/archive/pre-product-redesign/)。当前开发主线是 [`META-010` Agent usability and learning loop MVP](./docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md)。Phase 1 Agent state、Phase 2 Experience records、Phase 3 Procedure memory、Phase 4 Habit fast path 和 Phase 5 Skill promotion 已实现；learning-loop 真实评测 case、procedure edit / review、统一 learning review / show / history / explain-match / edit / promote / validate / decay / request-changes / approve / reject / disable / enable / rollback 入口、experience review、habit review、skill validation / approval / rejection / disable / enable / rollback、跨 eval evidence index、evidence index scenario / category / requires / skip-reason / permission / completion-layer / policy-decision / skipped-stage / policy-risk-flag / policy-reason / policy-context-budget / request-payload-stats / node-status / critic-action / memory-retrieval / llm-usage / promotion-generation-type / promotion-source-target / learning-kind / learning-validation / skill-validation / review-decision / audit-event 查询视图、evidence dashboard regression commands（含 eval-coverage / scenario / used-skill / procedure-id / habit-id / lineage-skill / promotion-generation-type / promotion-source-target / permission-summary / policy-reason / policy-context-budget-hotspot / request-payload-stats-hotspot / learning-kind / learning-validation / skill-validation / review-decision / audit-event 动态查询）/ eval coverage / skipped eval / model capability / node execution / critic action / completion evaluation / memory retrieval / LLM usage / runtime cost hotspot / execution policy / Planner skipped / policy risk flag / policy reason / policy context budget / request payload stats / permission governance / habit fast path / learning match explanation / learning gate / learning governance / learning history / learning approval / learning promotion / learning validation / learning edit / learning request-changes / learning decay / learning disable / learning restore / learning rollback / learning rejection / learning audit gap / skill lifecycle governance / skill promotion coverage / skill approval gate 视图、JSON / JSONL data habit promotion、active generated habit direct execute、CSV / TSV data habit promotion、SQLite data habit promotion、config / YAML / XML / dotenv / INI / properties habit promotion、plain text habit promotion、markdown habit promotion、HTML habit promotion、archive / tar.gz habit promotion、datetime habit promotion、read-only Git habit promotion（手动审批）、Python habit promotion（手动审批）、HTTP habit promotion（手动审批）、browser fetch habit promotion（手动审批）和 safe shell habit promotion（手动审批）已补齐，下一步是按真实稳定 habit 继续扩展 skill promotion 类型、继续扩展学习治理入口，并继续把 evidence dashboard 接入更多回归消费入口。

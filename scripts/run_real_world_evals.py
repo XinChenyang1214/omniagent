@@ -5,6 +5,7 @@ import argparse
 import fnmatch
 import json
 import os
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -19,6 +20,9 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCENARIOS = REPO_ROOT / "evals" / "real_world" / "scenarios.json"
 DEFAULT_RUN_ROOT = REPO_ROOT / "eval_runs"
+EVIDENCE_INDEX_SCHEMA_VERSION = "eval-evidence-index/v1"
+EVIDENCE_QUERY_SCHEMA_VERSION = "eval-evidence-query/v1"
+EVIDENCE_DASHBOARD_SCHEMA_VERSION = "eval-evidence-dashboard/v1"
 WORKSPACE_SNAPSHOT_SKIP_DIRS = {"tasks", "threads", "MEMORY", "WORKFLOWS", "__pycache__"}
 WORKSPACE_SNAPSHOT_SKIP_FILES = {"AGENT.md", "POLICY.md", "TOOLS.md", "USER.md"}
 TEXT_PREVIEW_SUFFIXES = {
@@ -41,6 +45,26 @@ def _load_json(path: Path) -> Any:
 def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _loads_json_object(raw: Any) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(str(raw))
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _loads_json_list(raw: Any) -> list[Any]:
+    if not raw:
+        return []
+    try:
+        payload = json.loads(str(raw))
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return payload if isinstance(payload, list) else []
 
 
 def _safe_child(root: Path, relative: str) -> Path:
@@ -638,9 +662,7 @@ def _collect_evidence(
                         )
                 for match in request_payload.get("vector_matches", []):
                     if isinstance(match, dict):
-                        evidence["vector_matches"].append(
-                            _summarize_vector_match(task_id, match)
-                        )
+                        evidence["vector_matches"].append(_summarize_vector_match(task_id, match))
             stats = call.get("request_payload_stats")
             if isinstance(stats, dict):
                 evidence["request_payload_stats"].append(
@@ -669,6 +691,17 @@ def _collect_evidence(
                     "tier": call.get("tier"),
                 }
             )
+            stats = call.get("request_payload_stats")
+            if isinstance(stats, dict):
+                evidence["request_payload_stats"].append(
+                    {
+                        "scope": "thread",
+                        "thread_id": thread_id,
+                        "prompt_name": call.get("prompt_name"),
+                        "json_chars": stats.get("json_chars"),
+                        "fields": stats.get("fields", {}),
+                    }
+                )
 
     evidence["used_skills"] = sorted(used_skills)
     evidence["vector_memory_entries"] = _collect_vector_memory_entries(workspace)
@@ -755,7 +788,9 @@ def _collect_vector_memory_entries(workspace: Path, limit: int = 20) -> list[dic
             {
                 "entry_id": payload.get("entry_id") or path.stem,
                 "source_type": payload.get("source_type"),
-                "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+                "metadata": payload.get("metadata")
+                if isinstance(payload.get("metadata"), dict)
+                else {},
                 "embedding_provider": payload.get("embedding_provider") or "unknown",
                 "embedding_model": payload.get("embedding_model") or "unknown",
                 "embedding_dimensions": dimensions,
@@ -774,11 +809,7 @@ def _build_embedding_summary(evidence: dict[str, Any]) -> dict[str, Any]:
         evidence.get("vector_memory_entries", [])
     )
     providers = sorted(
-        {
-            str(item.get("embedding_provider"))
-            for item in items
-            if item.get("embedding_provider")
-        }
+        {str(item.get("embedding_provider")) for item in items if item.get("embedding_provider")}
     )
     models = sorted(
         {str(item.get("embedding_model")) for item in items if item.get("embedding_model")}
@@ -873,9 +904,7 @@ def _build_failure_attribution(
         "embedding_models": embedding_summary.get("models", []),
         "embedding_fallback_count": embedding_summary.get("fallback_count", 0),
         "embedding_error_count": embedding_summary.get("error_count", 0),
-        "embedding_incompatible_match_count": embedding_summary.get(
-            "incompatible_match_count", 0
-        ),
+        "embedding_incompatible_match_count": embedding_summary.get("incompatible_match_count", 0),
     }
 
 
@@ -897,7 +926,9 @@ def _collect_workspace_snapshot(workspace: Path, limit: int = 80) -> list[dict[s
         }
         if path.suffix.lower() in TEXT_PREVIEW_SUFFIXES and item["size"] <= 8192:
             try:
-                item["preview"] = _short_text(path.read_text(encoding="utf-8", errors="replace"), 600)
+                item["preview"] = _short_text(
+                    path.read_text(encoding="utf-8", errors="replace"), 600
+                )
             except OSError as exc:
                 item["preview_error"] = str(exc)
         files.append(item)
@@ -1045,16 +1076,18 @@ def _write_case_diagnostics(
     lines.append("")
 
     if evidence.get("used_skills"):
-        lines.extend(["## Skill Usage", "", ", ".join(f"`{item}`" for item in evidence["used_skills"]), ""])
+        lines.extend(
+            ["## Skill Usage", "", ", ".join(f"`{item}`" for item in evidence["used_skills"]), ""]
+        )
 
     if evidence.get("policy_decisions"):
         lines.extend(["## Execution Policy", ""])
         rows: list[list[Any]] = []
         for item in evidence.get("policy_decisions", []):
             risk_flags = item.get("risk_flags") if isinstance(item.get("risk_flags"), dict) else {}
-            enabled_risks = ", ".join(
-                name for name, enabled in risk_flags.items() if enabled
-            ) or "-"
+            enabled_risks = (
+                ", ".join(name for name, enabled in risk_flags.items() if enabled) or "-"
+            )
             rows.append(
                 [
                     item.get("task_id"),
@@ -1248,7 +1281,11 @@ def _write_case_diagnostics(
                 )
         lines.append("")
 
-    embedding_summary = evidence.get("embedding_summary") if isinstance(evidence.get("embedding_summary"), dict) else {}
+    embedding_summary = (
+        evidence.get("embedding_summary")
+        if isinstance(evidence.get("embedding_summary"), dict)
+        else {}
+    )
     if embedding_summary or evidence.get("vector_matches") or evidence.get("vector_memory_entries"):
         lines.extend(
             [
@@ -1333,7 +1370,15 @@ def _write_case_diagnostics(
 
     if evidence.get("llm_calls"):
         total_tokens = sum(int(item.get("total_tokens") or 0) for item in evidence["llm_calls"])
-        lines.extend(["## LLM Calls", "", f"- count: `{len(evidence['llm_calls'])}`", f"- total_tokens: `{total_tokens}`", ""])
+        lines.extend(
+            [
+                "## LLM Calls",
+                "",
+                f"- count: `{len(evidence['llm_calls'])}`",
+                f"- total_tokens: `{total_tokens}`",
+                "",
+            ]
+        )
         lines.extend(
             _markdown_table(
                 ["Scope", "Prompt", "Model", "Tokens", "Latency Ms", "Task/Thread"],
@@ -1464,9 +1509,7 @@ def _evaluate_assertions(
         issues.append(f"forbidden route input types were used: {sorted(leaked_route_types)}")
 
     route_actions = {str(item.get("route_action")) for item in evidence.get("turns", [])}
-    required_route_actions = {
-        str(item) for item in assertions.get("required_route_action_any", [])
-    }
+    required_route_actions = {str(item) for item in assertions.get("required_route_action_any", [])}
     if required_route_actions and not (required_route_actions & route_actions):
         issues.append(
             "missing required route action; expected any of "
@@ -1499,22 +1542,16 @@ def _evaluate_assertions(
         if leaked:
             issues.append(f"forbidden skills were used: {sorted(leaked)}")
 
-    required_statuses = {
-        str(item) for item in assertions.get("required_node_status_any", [])
-    }
+    required_statuses = {str(item) for item in assertions.get("required_node_status_any", [])}
     if required_statuses:
-        seen_statuses = {
-            str(item.get("status")) for item in evidence.get("node_statuses", [])
-        }
+        seen_statuses = {str(item.get("status")) for item in evidence.get("node_statuses", [])}
         if not (required_statuses & seen_statuses):
             issues.append(
                 "missing required node status; expected any of "
                 f"{sorted(required_statuses)}, got {sorted(seen_statuses)}"
             )
 
-    denied_required = {
-        str(item) for item in assertions.get("required_permission_denied_any", [])
-    }
+    denied_required = {str(item) for item in assertions.get("required_permission_denied_any", [])}
     if denied_required:
         denied_seen = {
             str(item.get("permission"))
@@ -1547,8 +1584,7 @@ def _evaluate_assertions(
         key = str(expected.get("key", ""))
         value = expected.get("value")
         if not any(
-            isinstance(item.get("constraints"), dict)
-            and item["constraints"].get(key) == value
+            isinstance(item.get("constraints"), dict) and item["constraints"].get(key) == value
             for item in request_snapshots
         ):
             issues.append(
@@ -1562,8 +1598,7 @@ def _evaluate_assertions(
         key = str(expected.get("key", ""))
         value = expected.get("value")
         if not any(
-            isinstance(item.get("metadata"), dict)
-            and item["metadata"].get(key) == value
+            isinstance(item.get("metadata"), dict) and item["metadata"].get(key) == value
             for item in request_snapshots
         ):
             issues.append(
@@ -1573,16 +1608,12 @@ def _evaluate_assertions(
 
     max_llm_calls = assertions.get("max_llm_calls")
     if max_llm_calls is not None and len(evidence.get("llm_calls", [])) > int(max_llm_calls):
-        issues.append(
-            f"too many LLM calls: {len(evidence.get('llm_calls', []))} > {max_llm_calls}"
-        )
+        issues.append(f"too many LLM calls: {len(evidence.get('llm_calls', []))} > {max_llm_calls}")
 
     vector_matches = evidence.get("vector_matches", [])
     min_vector_match_count = assertions.get("min_vector_match_count")
     if min_vector_match_count is not None and len(vector_matches) < int(min_vector_match_count):
-        issues.append(
-            f"too few vector matches: {len(vector_matches)} < {min_vector_match_count}"
-        )
+        issues.append(f"too few vector matches: {len(vector_matches)} < {min_vector_match_count}")
     required_vector_entries = {
         str(item) for item in assertions.get("required_vector_match_entry_any", [])
     }
@@ -1599,9 +1630,7 @@ def _evaluate_assertions(
         issues.append("no compatible vector match was observed")
     max_vector_match_count = assertions.get("max_vector_match_count")
     if max_vector_match_count is not None and len(vector_matches) > int(max_vector_match_count):
-        issues.append(
-            f"too many vector matches: {len(vector_matches)} > {max_vector_match_count}"
-        )
+        issues.append(f"too many vector matches: {len(vector_matches)} > {max_vector_match_count}")
     forbidden_vector_entries = {
         str(item) for item in assertions.get("forbidden_vector_match_entry_any", [])
     }
@@ -1721,9 +1750,7 @@ def _evaluate_assertions(
         for pattern in forbidden_workspace_globs:
             matches = [path for path in workspace_files if fnmatch.fnmatch(path, pattern)]
             if matches:
-                issues.append(
-                    f"forbidden workspace glob matched {pattern}: {matches}"
-                )
+                issues.append(f"forbidden workspace glob matched {pattern}: {matches}")
 
     diagnosis = _diagnose(issues, executions, evidence)
     diagnosis_issue_count = len(issues)
@@ -1732,9 +1759,7 @@ def _evaluate_assertions(
         issues.append(
             f"unexpected diagnosis: expected any of {sorted(allowed_diagnoses)}, got {diagnosis}"
         )
-    required_layers = {
-        str(item) for item in assertions.get("required_failure_layer_any", [])
-    }
+    required_layers = {str(item) for item in assertions.get("required_failure_layer_any", [])}
     if required_layers:
         diagnosis_layer = _failure_layer(diagnosis, passed=False)
         if diagnosis_layer not in required_layers:
@@ -1748,15 +1773,14 @@ def _evaluate_assertions(
     return not issues, issues, diagnosis
 
 
-def _diagnose(
-    issues: list[str], executions: list[dict[str, Any]], evidence: dict[str, Any]
-) -> str:
+def _diagnose(issues: list[str], executions: list[dict[str, Any]], evidence: dict[str, Any]) -> str:
     if any(item.get("timed_out") for item in executions):
         return "runtime_timeout"
     if any(item.get("json") is None for item in executions):
         return "cli_or_infrastructure"
     if issues and any(
-        turn.get("route_input_type") in {"chitchat", "knowledge_query", "status_query", "system_request"}
+        turn.get("route_input_type")
+        in {"chitchat", "knowledge_query", "status_query", "system_request"}
         for turn in evidence.get("turns", [])
     ):
         return "router_or_interaction_dispatch"
@@ -1766,9 +1790,7 @@ def _diagnose(
         return "permission_guardrail"
     if any("missing required permission denial" in issue for issue in issues):
         return "permission_detection"
-    denied = [
-        item for item in evidence.get("permissions", []) if item.get("status") == "denied"
-    ]
+    denied = [item for item in evidence.get("permissions", []) if item.get("status") == "denied"]
     if denied:
         return "permission_policy_or_scenario_config"
     failed_nodes = [
@@ -1909,6 +1931,7 @@ def _run_one(
         "id": scenario["id"],
         "category": scenario.get("category", "uncategorized"),
         "kind": scenario.get("kind", "task"),
+        "requires": scenario.get("requires", []),
         "status": "passed" if passed else "failed",
         "diagnosis": diagnosis,
         "failure_layer": _failure_layer(diagnosis, passed=passed),
@@ -1918,7 +1941,9 @@ def _run_one(
         "task_ids": task_ids,
         "thread_ids": thread_ids,
         "exit_codes": [item.get("exit_code") for item in executions],
-        "duration_seconds": round(sum(float(item.get("duration_seconds", 0)) for item in executions), 3),
+        "duration_seconds": round(
+            sum(float(item.get("duration_seconds", 0)) for item in executions), 3
+        ),
         "evidence": evidence,
     }
     result["failure_attribution"] = _build_failure_attribution(
@@ -2000,6 +2025,4148 @@ def _write_summary(run_dir: Path, results: list[dict[str, Any]]) -> None:
     (run_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _relative_path(path: Path, root: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return str(path)
+
+
+def _artifact_record(path: Path, *, run_dir: Path, kind: str) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "path": str(path),
+        "run_relative_path": _relative_path(path, run_dir),
+        "exists": path.exists(),
+    }
+
+
+def _load_case_result(summary_result: dict[str, Any]) -> dict[str, Any]:
+    case_dir = summary_result.get("case_dir")
+    if isinstance(case_dir, str) and case_dir:
+        result_path = Path(case_dir) / "result.json"
+        if result_path.exists():
+            payload = _load_json(result_path)
+            if isinstance(payload, dict):
+                return payload
+    return summary_result
+
+
+def _load_scenario_metadata_for_index() -> dict[str, dict[str, Any]]:
+    try:
+        scenarios = _normalize_scenarios(DEFAULT_SCENARIOS)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+    return {
+        str(scenario["id"]): {
+            "category": scenario.get("category", "uncategorized"),
+            "kind": scenario.get("kind", "task"),
+            "requires": scenario.get("requires", []),
+        }
+        for scenario in scenarios
+        if scenario.get("id")
+    }
+
+
+def _summarize_permissions(permissions: list[dict[str, Any]]) -> dict[str, int]:
+    summary: dict[str, int] = {}
+    for item in permissions:
+        permission = str(item.get("permission") or "unknown")
+        status = str(item.get("status") or "unknown")
+        key = f"{permission}:{status}"
+        summary[key] = summary.get(key, 0) + 1
+    return dict(sorted(summary.items()))
+
+
+def _sqlite_has_table(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def _skill_lifecycle_key(skill_name: Any, version: Any) -> str:
+    return f"{skill_name or ''}\u0000{version or ''}"
+
+
+def _read_skill_lifecycle_records(
+    *,
+    run_dir: Path,
+    db_path: Path,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not db_path.exists():
+        return [], []
+
+    records: dict[str, dict[str, Any]] = {}
+
+    def ensure_record(skill_name: Any, version: Any) -> dict[str, Any]:
+        key = _skill_lifecycle_key(skill_name, version)
+        if key not in records:
+            records[key] = {
+                "skill_name": skill_name,
+                "version": version,
+                "source": None,
+                "lifecycle_status": None,
+                "draft_status": None,
+                "permission_requirements": [],
+                "tags": [],
+                "sandbox_level": None,
+                "registration_actions": [],
+                "registration_statuses": [],
+                "approval_statuses": [],
+                "validation_passed": [],
+                "last_validated_at": None,
+                "last_approved_at": None,
+                "last_seen_at": None,
+                "path": str(db_path),
+            }
+        return records[key]
+
+    artifacts = [_artifact_record(db_path, run_dir=run_dir, kind="skill_lifecycle_db")]
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+    except sqlite3.Error:
+        return [], artifacts
+
+    try:
+        if _sqlite_has_table(conn, "skill_registry"):
+            rows = conn.execute(
+                """
+                SELECT skill_name, version, source, lifecycle_status,
+                       permission_requirements_json, tags_json, sandbox_level,
+                       last_validated_at, last_approved_at, last_seen_at
+                FROM skill_registry
+                ORDER BY skill_name, version
+                """
+            ).fetchall()
+            for row in rows:
+                record = ensure_record(row["skill_name"], row["version"])
+                record.update(
+                    {
+                        "source": row["source"],
+                        "lifecycle_status": row["lifecycle_status"],
+                        "permission_requirements": _loads_json_list(
+                            row["permission_requirements_json"]
+                        ),
+                        "tags": _loads_json_list(row["tags_json"]),
+                        "sandbox_level": row["sandbox_level"],
+                        "last_validated_at": row["last_validated_at"],
+                        "last_approved_at": row["last_approved_at"],
+                        "last_seen_at": row["last_seen_at"],
+                    }
+                )
+
+        if _sqlite_has_table(conn, "skill_drafts"):
+            rows = conn.execute(
+                """
+                SELECT skill_name, version, lifecycle_status, permission_requirements_json
+                FROM skill_drafts
+                ORDER BY skill_name, version
+                """
+            ).fetchall()
+            for row in rows:
+                record = ensure_record(row["skill_name"], row["version"])
+                record["draft_status"] = row["lifecycle_status"]
+                if not record["permission_requirements"]:
+                    record["permission_requirements"] = _loads_json_list(
+                        row["permission_requirements_json"]
+                    )
+
+        if _sqlite_has_table(conn, "skill_registration_records"):
+            rows = conn.execute(
+                """
+                SELECT skill_name, version, action, status, metadata_json, created_at
+                FROM skill_registration_records
+                ORDER BY created_at DESC
+                """
+            ).fetchall()
+            for row in rows:
+                record = ensure_record(row["skill_name"], row["version"])
+                action = str(row["action"])
+                status = str(row["status"])
+                if action not in record["registration_actions"]:
+                    record["registration_actions"].append(action)
+                if status not in record["registration_statuses"]:
+                    record["registration_statuses"].append(status)
+                metadata = _loads_json_object(row["metadata_json"])
+                if metadata.get("note") and not record.get("latest_registration_note"):
+                    record["latest_registration_note"] = metadata.get("note")
+
+        if _sqlite_has_table(conn, "skill_approval_records"):
+            rows = conn.execute(
+                """
+                SELECT skill_name, version, status, created_at
+                FROM skill_approval_records
+                ORDER BY created_at DESC
+                """
+            ).fetchall()
+            for row in rows:
+                record = ensure_record(row["skill_name"], row["version"])
+                status = str(row["status"])
+                if status not in record["approval_statuses"]:
+                    record["approval_statuses"].append(status)
+
+        if _sqlite_has_table(conn, "skill_validation_reports"):
+            rows = conn.execute(
+                """
+                SELECT skill_name, version, passed, created_at
+                FROM skill_validation_reports
+                ORDER BY created_at DESC
+                """
+            ).fetchall()
+            for row in rows:
+                record = ensure_record(row["skill_name"], row["version"])
+                passed = bool(row["passed"])
+                if passed not in record["validation_passed"]:
+                    record["validation_passed"].append(passed)
+    except sqlite3.Error:
+        return [], artifacts
+    finally:
+        conn.close()
+
+    return (
+        sorted(
+            records.values(),
+            key=lambda item: (str(item.get("skill_name") or ""), str(item.get("version") or "")),
+        ),
+        artifacts,
+    )
+
+
+def _read_learning_artifacts(
+    *,
+    run_dir: Path,
+    workspace: Path,
+    task_ids: list[str],
+    skill_db_path: Path | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    learning: dict[str, Any] = {
+        "procedure_matches": [],
+        "habit_fast_paths": [],
+        "experience_records": [],
+        "procedure_memory_records": [],
+        "skill_lineages": [],
+        "skill_lifecycle_records": [],
+    }
+    artifacts: list[dict[str, Any]] = []
+    for task_id in task_ids:
+        task_dir = workspace / "tasks" / task_id
+        procedure_match_path = task_dir / "procedure" / "procedure_match.json"
+        if procedure_match_path.exists():
+            payload = _load_json(procedure_match_path)
+            if isinstance(payload, dict):
+                rejected_candidates = [
+                    item
+                    for item in list(payload.get("rejected_candidates") or [])
+                    if isinstance(item, dict)
+                ]
+                learning["procedure_matches"].append(
+                    {
+                        "task_id": task_id,
+                        "matched": bool(payload.get("matched")),
+                        "procedure_id": payload.get("matched_procedure_id"),
+                        "status": payload.get("matched_status"),
+                        "confidence": payload.get("confidence"),
+                        "reason": payload.get("reason"),
+                        "suggestion_mode": payload.get("suggestion_mode"),
+                        "required_confirmation": bool(
+                            payload.get("required_confirmation")
+                            or payload.get("requires_confirmation")
+                        ),
+                        "rejected_candidate_count": len(rejected_candidates),
+                        "rejected_candidates": rejected_candidates,
+                        "path": str(procedure_match_path),
+                    }
+                )
+            artifacts.append(
+                _artifact_record(
+                    procedure_match_path,
+                    run_dir=run_dir,
+                    kind="procedure_match",
+                )
+            )
+
+        habit_path = task_dir / "procedure" / "habit_fast_path.json"
+        if habit_path.exists():
+            payload = _load_json(habit_path)
+            if isinstance(payload, dict):
+                learning["habit_fast_paths"].append(
+                    {
+                        "task_id": task_id,
+                        "decision": payload.get("decision"),
+                        "habit_id": payload.get("habit_id"),
+                        "source_experience_ids": payload.get("source_experience_ids", []),
+                        "validator_evidence_refs": payload.get(
+                            "validator_evidence_refs",
+                            [],
+                        ),
+                        "path": str(habit_path),
+                    }
+                )
+            artifacts.append(_artifact_record(habit_path, run_dir=run_dir, kind="habit_fast_path"))
+
+        experience_path = task_dir / "experience" / "experience_record.json"
+        if experience_path.exists():
+            payload = _load_json(experience_path)
+            if isinstance(payload, dict):
+                validation = payload.get("validation")
+                if not isinstance(validation, dict):
+                    validation = {}
+                learning["experience_records"].append(
+                    {
+                        "task_id": task_id,
+                        "experience_id": payload.get("experience_id"),
+                        "status": payload.get("status"),
+                        "validation_verdict": validation.get("verdict"),
+                        "path": str(experience_path),
+                    }
+                )
+            artifacts.append(
+                _artifact_record(experience_path, run_dir=run_dir, kind="experience_record")
+            )
+
+    procedures_root = workspace / "procedures"
+    if procedures_root.exists():
+        for procedure_path in sorted(procedures_root.glob("*/*.json")):
+            payload = _load_json(procedure_path)
+            if isinstance(payload, dict):
+                audit_notes = [
+                    item
+                    for item in list(payload.get("audit_notes") or [])
+                    if isinstance(item, dict)
+                ]
+                reviews = [
+                    item for item in list(payload.get("reviews") or []) if isinstance(item, dict)
+                ]
+                audit_events = [str(item.get("event")) for item in audit_notes if item.get("event")]
+                review_decisions = [
+                    str(item.get("decision")) for item in reviews if item.get("decision")
+                ]
+                status = str(payload.get("status") or "draft")
+                previous_status = ""
+                restored_status = ""
+                for note in reversed(audit_notes):
+                    if not restored_status and note.get("event") == "enabled":
+                        restored_status = str(note.get("restored_status") or "")
+                    if note.get("event") == "disabled" and note.get("previous_status"):
+                        previous_status = str(note.get("previous_status"))
+                    if (
+                        not previous_status
+                        and note.get("event") == "reviewed"
+                        and note.get("decision") == "rejected"
+                        and note.get("from_status")
+                    ):
+                        previous_status = str(note.get("from_status"))
+                    if previous_status and restored_status:
+                        break
+                object_type = (
+                    "habit"
+                    if status == "habit" or (status == "disabled" and previous_status == "habit")
+                    else "procedure"
+                )
+                learning["procedure_memory_records"].append(
+                    {
+                        "procedure_id": payload.get("procedure_id"),
+                        "object_type": object_type,
+                        "status": status,
+                        "previous_status": previous_status or None,
+                        "restored_status": restored_status or None,
+                        "review_status": payload.get("review_status"),
+                        "review_decisions": review_decisions,
+                        "latest_review_decision": (
+                            review_decisions[-1] if review_decisions else None
+                        ),
+                        "risk_level": payload.get("risk_level"),
+                        "success_count": payload.get("success_count", 0),
+                        "failure_count": payload.get("failure_count", 0),
+                        "review_count": len(reviews),
+                        "audit_event_count": len(audit_notes),
+                        "audit_events": audit_events,
+                        "latest_audit_event": audit_events[-1] if audit_events else None,
+                        "source_experience_ids": payload.get("source_experience_ids", []),
+                        "path": str(procedure_path),
+                    }
+                )
+            artifacts.append(
+                _artifact_record(
+                    procedure_path,
+                    run_dir=run_dir,
+                    kind="procedure_memory_record",
+                )
+            )
+
+    managed_skills = workspace / "skills" / "managed"
+    if managed_skills.exists():
+        for lineage_path in sorted(managed_skills.glob("*/lineage.json")):
+            payload = _load_json(lineage_path)
+            if isinstance(payload, dict):
+                learning["skill_lineages"].append(
+                    {
+                        "skill_name": payload.get("skill_name"),
+                        "version": payload.get("skill_version") or payload.get("version"),
+                        "habit_id": payload.get("habit_id"),
+                        "procedure_id": payload.get("procedure_id"),
+                        "generation_type": payload.get("generation_type"),
+                        "source_targets": _string_values(payload.get("source_targets")),
+                        "source_experience_ids": payload.get("source_experience_ids", []),
+                        "path": str(lineage_path),
+                    }
+                )
+            artifacts.append(_artifact_record(lineage_path, run_dir=run_dir, kind="skill_lineage"))
+    if skill_db_path is not None:
+        skill_records, skill_artifacts = _read_skill_lifecycle_records(
+            run_dir=run_dir,
+            db_path=skill_db_path,
+        )
+        learning["skill_lifecycle_records"].extend(skill_records)
+        artifacts.extend(skill_artifacts)
+    return learning, artifacts
+
+
+def _summarize_result_for_index(
+    *,
+    run_root: Path,
+    summary_path: Path,
+    summary_result: dict[str, Any],
+    scenario_metadata: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    run_dir = summary_path.parent
+    result = _load_case_result(summary_result)
+    scenario_meta = (scenario_metadata or {}).get(str(result.get("id") or ""), {})
+    evidence = result.get("evidence") if isinstance(result.get("evidence"), dict) else {}
+    task_ids = [str(item) for item in result.get("task_ids", [])]
+    thread_ids = [str(item) for item in result.get("thread_ids", [])]
+    case_dir = Path(str(result.get("case_dir"))) if result.get("case_dir") else None
+    workspace = Path(str(result.get("workspace"))) if result.get("workspace") else None
+
+    artifacts: list[dict[str, Any]] = []
+    if case_dir is not None:
+        artifacts.extend(
+            [
+                _artifact_record(case_dir / "result.json", run_dir=run_dir, kind="case_result"),
+                _artifact_record(case_dir / "diagnostics.md", run_dir=run_dir, kind="diagnostics"),
+            ]
+        )
+
+    learning_evidence = {
+        "procedure_matches": [],
+        "habit_fast_paths": [],
+        "experience_records": [],
+        "procedure_memory_records": [],
+        "skill_lineages": [],
+        "skill_lifecycle_records": [],
+    }
+    if workspace is not None and workspace.exists():
+        learning_evidence, learning_artifacts = _read_learning_artifacts(
+            run_dir=run_dir,
+            workspace=workspace,
+            task_ids=task_ids,
+            skill_db_path=run_dir / "data" / f"{result.get('id')}.sqlite3",
+        )
+        artifacts.extend(learning_artifacts)
+
+    llm_calls = evidence.get("llm_calls", []) if isinstance(evidence, dict) else []
+    total_tokens = sum(int(item.get("total_tokens") or 0) for item in llm_calls)
+    completion_evaluations = (
+        evidence.get("completion_evaluations", []) if isinstance(evidence, dict) else []
+    )
+    completion_layers = sorted(
+        {
+            str(item.get("primary_failure_layer"))
+            for item in completion_evaluations
+            if item.get("primary_failure_layer")
+        }
+    )
+    permissions = evidence.get("permissions", []) if isinstance(evidence, dict) else []
+    requires = result.get("requires")
+    if not isinstance(requires, list):
+        requires = scenario_meta.get("requires", [])
+    skip_reason = result.get("skip_reason")
+    if not skip_reason and result.get("status") == "skipped":
+        skip_reason = result.get("diagnosis")
+    failure_layer = result.get("failure_layer") or "none"
+    return {
+        "run_id": _relative_path(run_dir, run_root),
+        "run_dir": str(run_dir),
+        "scenario_id": result.get("id"),
+        "category": result.get("category") or scenario_meta.get("category", "uncategorized"),
+        "kind": result.get("kind") or scenario_meta.get("kind", "task"),
+        "requires": requires,
+        "status": result.get("status"),
+        "skip_reason": skip_reason,
+        "diagnosis": result.get("diagnosis"),
+        "failure_layer": failure_layer,
+        "issues": result.get("issues", []),
+        "duration_seconds": result.get("duration_seconds"),
+        "task_ids": task_ids,
+        "thread_ids": thread_ids,
+        "used_skills": evidence.get("used_skills", []) if isinstance(evidence, dict) else [],
+        "permission_summary": _summarize_permissions(permissions),
+        "policy_decisions": evidence.get("policy_decisions", [])
+        if isinstance(evidence, dict)
+        else [],
+        "node_statuses": evidence.get("node_statuses", [])
+        if isinstance(evidence, dict)
+        else [],
+        "critic_actions": evidence.get("critic_actions", [])
+        if isinstance(evidence, dict)
+        else [],
+        "request_payload_stats": evidence.get("request_payload_stats", [])
+        if isinstance(evidence, dict)
+        else [],
+        "completion_failure_layers": completion_layers,
+        "model_capability_suspected": any(
+            bool(item.get("model_capability_suspected")) for item in completion_evaluations
+        ),
+        "embedding_summary": evidence.get("embedding_summary", {})
+        if isinstance(evidence, dict)
+        else {},
+        "llm_call_count": len(llm_calls),
+        "llm_total_tokens": total_tokens,
+        "learning_evidence": learning_evidence,
+        "artifacts": artifacts,
+    }
+
+
+def _write_evidence_index(run_root: Path, output_json: Path) -> dict[str, Any]:
+    run_root = run_root.resolve()
+    summary_paths = sorted(run_root.rglob("summary.json"))
+    scenario_metadata = _load_scenario_metadata_for_index()
+    cases: list[dict[str, Any]] = []
+    runs: list[dict[str, Any]] = []
+    for summary_path in summary_paths:
+        summary = _load_json(summary_path)
+        if not isinstance(summary, dict):
+            continue
+        results = [item for item in summary.get("results", []) if isinstance(item, dict)]
+        runs.append(
+            {
+                "run_id": _relative_path(summary_path.parent, run_root),
+                "run_dir": str(summary_path.parent),
+                "created_at": summary.get("created_at"),
+                "total": summary.get("total", len(results)),
+                "passed": summary.get("passed", 0),
+                "failed": summary.get("failed", 0),
+                "skipped": summary.get("skipped", 0),
+                "summary_path": str(summary_path),
+            }
+        )
+        for result in results:
+            cases.append(
+                _summarize_result_for_index(
+                    run_root=run_root,
+                    summary_path=summary_path,
+                    summary_result=result,
+                    scenario_metadata=scenario_metadata,
+                )
+            )
+
+    payload = {
+        "schema_version": EVIDENCE_INDEX_SCHEMA_VERSION,
+        "run_root": str(run_root),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "run_count": len(runs),
+        "case_count": len(cases),
+        "passed": sum(1 for item in cases if item.get("status") == "passed"),
+        "failed": sum(1 for item in cases if item.get("status") == "failed"),
+        "skipped": sum(1 for item in cases if item.get("status") == "skipped"),
+        "summary": {
+            "by_status": _count_case_values(
+                cases, lambda case: [case.get("status", "unknown")]
+            ),
+            "by_scenario": _count_case_values(
+                cases,
+                lambda case: [case.get("scenario_id", "unknown")],
+            ),
+            "by_category": _count_case_values(
+                cases,
+                lambda case: [case.get("category", "uncategorized")],
+            ),
+            "by_requires": _count_case_values(cases, _requires_values),
+            "by_skip_reason": _count_case_values(
+                cases,
+                lambda case: [case.get("skip_reason")] if case.get("skip_reason") else [],
+            ),
+            "by_failure_layer": _count_case_values(
+                cases,
+                lambda case: [case.get("failure_layer", "unknown")],
+            ),
+        },
+        "runs": runs,
+        "cases": cases,
+    }
+    _write_json(output_json, payload)
+    _write_evidence_index_markdown(output_json.with_suffix(".md"), payload)
+    return payload
+
+
+def _learning_evidence_count(case: dict[str, Any]) -> int:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return 0
+    return sum(len(value) for value in learning.values() if isinstance(value, list))
+
+
+def _split_filter_values(values: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    for raw in values or []:
+        for part in str(raw).split(","):
+            value = part.strip()
+            if value and value not in normalized:
+                normalized.append(value)
+    return normalized
+
+
+def _string_values(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    normalized: list[str] = []
+    for value in values:
+        text = str(value)
+        if text and text not in normalized:
+            normalized.append(text)
+    return normalized
+
+
+def _learning_values(case: dict[str, Any], section: str, key: str) -> list[str]:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return []
+    records = learning.get(section)
+    if not isinstance(records, list):
+        return []
+    values: list[str] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        value = record.get(key)
+        if value is None:
+            continue
+        text = str(value)
+        if text and text not in values:
+            values.append(text)
+    return values
+
+
+def _procedure_ids(case: dict[str, Any]) -> list[str]:
+    values = _learning_values(case, "procedure_matches", "procedure_id")
+    learning = case.get("learning_evidence")
+    if isinstance(learning, dict):
+        records = learning.get("procedure_memory_records")
+        if isinstance(records, list):
+            for record in records:
+                if not isinstance(record, dict) or record.get("object_type") == "habit":
+                    continue
+                value = record.get("procedure_id")
+                if value is None:
+                    continue
+                text = str(value)
+                if text and text not in values:
+                    values.append(text)
+    for value in _learning_values(case, "skill_lineages", "procedure_id"):
+        if value not in values:
+            values.append(value)
+    return values
+
+
+def _habit_ids(case: dict[str, Any]) -> list[str]:
+    values = _learning_values(case, "habit_fast_paths", "habit_id")
+    learning = case.get("learning_evidence")
+    if isinstance(learning, dict):
+        records = learning.get("procedure_memory_records")
+        if isinstance(records, list):
+            for record in records:
+                if not isinstance(record, dict) or record.get("object_type") != "habit":
+                    continue
+                value = record.get("procedure_id")
+                if value is None:
+                    continue
+                text = str(value)
+                if text and text not in values:
+                    values.append(text)
+    for value in _learning_values(case, "skill_lineages", "habit_id"):
+        if value not in values:
+            values.append(value)
+    return values
+
+
+def _lineage_skill_names(case: dict[str, Any]) -> list[str]:
+    values = _learning_values(case, "skill_lineages", "skill_name")
+    for value in _learning_values(case, "skill_lifecycle_records", "skill_name"):
+        if value not in values:
+            values.append(value)
+    return values
+
+
+def _promotion_generation_types(case: dict[str, Any]) -> list[str]:
+    return _learning_values(case, "skill_lineages", "generation_type")
+
+
+def _learning_list_values(case: dict[str, Any], section: str, key: str) -> list[str]:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return []
+    records = learning.get(section)
+    if not isinstance(records, list):
+        return []
+    values: list[str] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        for value in _string_values(record.get(key)):
+            if value not in values:
+                values.append(value)
+    return values
+
+
+def _promotion_source_targets(case: dict[str, Any]) -> list[str]:
+    return _learning_list_values(case, "skill_lineages", "source_targets")
+
+
+def _requires_values(case: dict[str, Any]) -> list[str]:
+    return _string_values(case.get("requires"))
+
+
+def _procedure_match_summaries(case: dict[str, Any]) -> list[str]:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return []
+    records = learning.get("procedure_matches")
+    if not isinstance(records, list):
+        return []
+    values: list[str] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        procedure_id = str(record.get("procedure_id") or "none")
+        matched_value = record.get("matched")
+        if matched_value is True:
+            matched = "matched"
+        elif matched_value is False:
+            matched = "not_matched"
+        else:
+            matched = "unknown"
+        mode = str(record.get("suggestion_mode") or "-")
+        requires_confirmation = bool(
+            record.get("required_confirmation") or record.get("requires_confirmation")
+        )
+        rejected_count = record.get("rejected_candidate_count")
+        if rejected_count is None:
+            rejected = record.get("rejected_candidates")
+            rejected_count = len(rejected) if isinstance(rejected, list) else 0
+        summary = (
+            f"{procedure_id} {matched} mode={mode} "
+            f"confirm={str(requires_confirmation).lower()} rejected={rejected_count}"
+        )
+        if summary not in values:
+            values.append(summary)
+    return values
+
+
+def _skill_validation_statuses(case: dict[str, Any]) -> list[str]:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return []
+    records = learning.get("skill_lifecycle_records")
+    if not isinstance(records, list):
+        return []
+    values: list[str] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        validation_results = record.get("validation_passed")
+        added_from_result = False
+        if isinstance(validation_results, list):
+            for result in validation_results:
+                status = "passed" if bool(result) else "failed"
+                added_from_result = True
+                if status not in values:
+                    values.append(status)
+        if record.get("last_validated_at") and not added_from_result and "recorded" not in values:
+            values.append("recorded")
+    return values
+
+
+def _learning_validation_statuses(case: dict[str, Any]) -> list[str]:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return []
+    values: list[str] = []
+
+    def add(value: str) -> None:
+        if value and value not in values:
+            values.append(value)
+
+    procedure_records = learning.get("procedure_memory_records")
+    if isinstance(procedure_records, list):
+        for record in procedure_records:
+            if not isinstance(record, dict):
+                continue
+            is_approved = (
+                str(record.get("review_status") or "") == "approved"
+                or str(record.get("latest_review_decision") or "") == "approved"
+                or "approved" in _string_values(record.get("review_decisions"))
+            )
+            if is_approved:
+                object_type = str(record.get("object_type") or "procedure")
+                if object_type in {"procedure", "habit"}:
+                    add(object_type)
+                add("approved")
+                add("recorded")
+
+    skill_statuses = _skill_validation_statuses(case)
+    if skill_statuses:
+        add("skill")
+        add("recorded")
+        for status in skill_statuses:
+            add(status)
+    return values
+
+
+def _learning_review_decisions(case: dict[str, Any]) -> list[str]:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return []
+    records = learning.get("procedure_memory_records")
+    if not isinstance(records, list):
+        return []
+    values: list[str] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        for decision in _string_values(record.get("review_decisions")):
+            if decision not in values:
+                values.append(decision)
+        latest = str(record.get("latest_review_decision") or "")
+        if latest and latest not in values:
+            values.append(latest)
+    return values
+
+
+def _learning_audit_events(case: dict[str, Any]) -> list[str]:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return []
+    records = learning.get("procedure_memory_records")
+    if not isinstance(records, list):
+        return []
+    values: list[str] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        for event in _string_values(record.get("audit_events")):
+            if event not in values:
+                values.append(event)
+        latest = str(record.get("latest_audit_event") or "")
+        if latest and latest not in values:
+            values.append(latest)
+    return values
+
+
+def _permission_values(case: dict[str, Any]) -> list[str]:
+    summary = case.get("permission_summary")
+    if not isinstance(summary, dict):
+        return []
+    values: list[str] = []
+    for key, value in summary.items():
+        try:
+            count = int(value or 0)
+        except (TypeError, ValueError):
+            count = 0
+        if count > 0:
+            values.append(str(key))
+    return sorted(values)
+
+
+def _learning_evidence_kinds(case: dict[str, Any]) -> list[str]:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return []
+    kinds: list[str] = []
+    for key, records in learning.items():
+        if isinstance(records, list) and any(isinstance(item, dict) for item in records):
+            kinds.append(str(key))
+    return sorted(kinds)
+
+
+def _completion_layers(case: dict[str, Any]) -> list[str]:
+    return _string_values(case.get("completion_failure_layers"))
+
+
+def _completion_layer_filter_values(case: dict[str, Any]) -> list[str]:
+    values = _completion_layers(case)
+    if any(value and value != "none" for value in values):
+        values.append("recorded")
+    return values
+
+
+def _policy_decisions(case: dict[str, Any]) -> list[str]:
+    records = case.get("policy_decisions")
+    if not isinstance(records, list):
+        return []
+    values: list[str] = []
+    for record in records:
+        if isinstance(record, dict):
+            value = record.get("policy_decision")
+        else:
+            value = record
+        if value is None:
+            continue
+        text = str(value)
+        if text and text not in values:
+            values.append(text)
+    return values
+
+
+def _policy_skipped_stages(case: dict[str, Any]) -> list[str]:
+    records = case.get("policy_decisions")
+    if not isinstance(records, list):
+        return []
+    values: list[str] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        for value in _string_values(record.get("skipped_stages")):
+            if value not in values:
+                values.append(value)
+    return values
+
+
+def _policy_risk_flags(case: dict[str, Any]) -> list[str]:
+    records = case.get("policy_decisions")
+    if not isinstance(records, list):
+        return []
+    values: list[str] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        flags = record.get("risk_flags")
+        if not isinstance(flags, dict):
+            continue
+        for name, enabled in flags.items():
+            text = str(name)
+            if enabled and text and text not in values:
+                values.append(text)
+    return values
+
+
+def _policy_reasons(case: dict[str, Any]) -> list[str]:
+    records = case.get("policy_decisions")
+    if not isinstance(records, list):
+        return []
+    values: list[str] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        reason = record.get("reason")
+        if reason is None:
+            continue
+        text = str(reason)
+        if text and text not in values:
+            values.append(text)
+    return values
+
+
+def _bucket_items(value: int) -> str:
+    if value <= 0:
+        return "0"
+    if value <= 5:
+        return "1-5"
+    if value <= 20:
+        return "6-20"
+    return "21+"
+
+
+def _bucket_json_chars(value: int) -> str:
+    if value <= 0:
+        return "0"
+    if value < 1_000:
+        return "1-999"
+    if value < 10_000:
+        return "1000-9999"
+    if value < 50_000:
+        return "10000-49999"
+    return "50000+"
+
+
+def _policy_context_budget_signals(case: dict[str, Any]) -> list[str]:
+    records = case.get("policy_decisions")
+    if not isinstance(records, list):
+        return []
+    values: list[str] = []
+
+    def add(value: str) -> None:
+        if value and value not in values:
+            values.append(value)
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        budget = record.get("context_budget")
+        if not isinstance(budget, dict) or not budget:
+            continue
+        add("recorded")
+        for name, payload in budget.items():
+            key = str(name)
+            if not key:
+                continue
+            if isinstance(payload, dict):
+                saw_metric = False
+                if payload.get("items") is not None:
+                    try:
+                        items = int(payload.get("items") or 0)
+                    except (TypeError, ValueError):
+                        items = 0
+                    add(f"{key}:items:{_bucket_items(items)}")
+                    saw_metric = True
+                if payload.get("json_chars") is not None:
+                    try:
+                        json_chars = int(payload.get("json_chars") or 0)
+                    except (TypeError, ValueError):
+                        json_chars = 0
+                    add(f"{key}:json_chars:{_bucket_json_chars(json_chars)}")
+                    saw_metric = True
+                if not saw_metric:
+                    add(f"{key}:recorded")
+                continue
+            try:
+                json_chars = int(payload or 0)
+            except (TypeError, ValueError):
+                add(f"{key}:recorded")
+                continue
+            add(f"{key}:json_chars:{_bucket_json_chars(json_chars)}")
+    return values
+
+
+def _request_payload_stats_signals(case: dict[str, Any]) -> list[str]:
+    records = case.get("request_payload_stats")
+    if not isinstance(records, list):
+        return []
+    values: list[str] = []
+
+    def add(value: str) -> None:
+        if value and value not in values:
+            values.append(value)
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        add("recorded")
+        scope = str(record.get("scope") or "")
+        if scope:
+            add(f"scope:{scope}")
+        prompt_name = str(record.get("prompt_name") or "")
+        if prompt_name:
+            add(f"prompt:{prompt_name}")
+        if record.get("json_chars") is not None:
+            try:
+                total_chars = int(record.get("json_chars") or 0)
+            except (TypeError, ValueError):
+                total_chars = 0
+            add(f"total:json_chars:{_bucket_json_chars(total_chars)}")
+        fields = record.get("fields")
+        if not isinstance(fields, dict):
+            continue
+        for name, payload in fields.items():
+            key = str(name)
+            if not key or not isinstance(payload, dict):
+                continue
+            if payload.get("items") is not None:
+                try:
+                    items = int(payload.get("items") or 0)
+                except (TypeError, ValueError):
+                    items = 0
+                add(f"{key}:items:{_bucket_items(items)}")
+            if payload.get("json_chars") is not None:
+                try:
+                    json_chars = int(payload.get("json_chars") or 0)
+                except (TypeError, ValueError):
+                    json_chars = 0
+                add(f"{key}:json_chars:{_bucket_json_chars(json_chars)}")
+    return values
+
+
+def _bucket_attempts(value: int) -> str:
+    if value <= 0:
+        return "0"
+    if value == 1:
+        return "1"
+    if value == 2:
+        return "2"
+    return "3+"
+
+
+def _node_status_signals(case: dict[str, Any]) -> list[str]:
+    records = case.get("node_statuses")
+    if not isinstance(records, list):
+        return []
+    values: list[str] = []
+
+    def add(value: str) -> None:
+        if value and value not in values:
+            values.append(value)
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        add("recorded")
+        status = str(record.get("status") or "")
+        if status:
+            add(f"status:{status}")
+        node_type = str(record.get("type") or "")
+        if node_type:
+            add(f"type:{node_type}")
+        skill_name = str(record.get("skill_name") or record.get("selected_skill") or "")
+        if skill_name:
+            add(f"skill:{skill_name}")
+        executor_hint = str(record.get("executor_hint") or "")
+        if executor_hint:
+            add(f"executor:{executor_hint}")
+        action = str(record.get("action") or "")
+        if action:
+            add(f"action:{action}")
+        if record.get("attempts") is not None:
+            try:
+                attempts = int(record.get("attempts") or 0)
+            except (TypeError, ValueError):
+                attempts = 0
+            add(f"attempts:{_bucket_attempts(attempts)}")
+        if record.get("error_message"):
+            add("error:present")
+    return values
+
+
+def _critic_action_signals(case: dict[str, Any]) -> list[str]:
+    records = case.get("critic_actions")
+    if not isinstance(records, list):
+        return []
+    values: list[str] = []
+
+    def add(value: str) -> None:
+        if value and value not in values:
+            values.append(value)
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        add("recorded")
+        action = str(record.get("action") or "")
+        if action:
+            add(f"action:{action}")
+        target_id = str(record.get("target_id") or "")
+        if target_id:
+            add(f"target:{target_id}")
+        if record.get("summary"):
+            add("summary:present")
+    return values
+
+
+def _embedding_summary(case: dict[str, Any]) -> dict[str, Any]:
+    summary = case.get("embedding_summary")
+    return summary if isinstance(summary, dict) else {}
+
+
+def _case_int_value(case: dict[str, Any], key: str) -> int | None:
+    if key not in case or case.get(key) is None:
+        return None
+    try:
+        return int(case.get(key))
+    except (TypeError, ValueError):
+        return None
+
+
+def _case_float_value(case: dict[str, Any], key: str) -> float | None:
+    if key not in case or case.get(key) is None:
+        return None
+    try:
+        return float(case.get(key))
+    except (TypeError, ValueError):
+        return None
+
+
+def _token_usage_bucket(total_tokens: int) -> str:
+    if total_tokens <= 0:
+        return "tokens:0"
+    if total_tokens < 1_000:
+        return "tokens:1-999"
+    if total_tokens < 10_000:
+        return "tokens:1000-9999"
+    return "tokens:10000+"
+
+
+def _duration_bucket(duration_seconds: float) -> str:
+    if duration_seconds < 1:
+        return "duration:<1s"
+    if duration_seconds < 10:
+        return "duration:1-10s"
+    if duration_seconds < 60:
+        return "duration:10-60s"
+    return "duration:60s+"
+
+
+def _llm_usage_signals(case: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+
+    def add(value: str) -> None:
+        if value and value not in values:
+            values.append(value)
+
+    call_count = _case_int_value(case, "llm_call_count")
+    total_tokens = _case_int_value(case, "llm_total_tokens")
+    duration_seconds = _case_float_value(case, "duration_seconds")
+
+    if call_count is None and total_tokens is None:
+        add("llm_unknown")
+    elif (call_count or 0) > 0:
+        add("llm_called")
+    else:
+        add("no_llm")
+
+    if total_tokens is not None:
+        add(_token_usage_bucket(total_tokens))
+    elif call_count == 0:
+        add("tokens:0")
+
+    if duration_seconds is not None:
+        add(_duration_bucket(duration_seconds))
+
+    return values
+
+
+def _memory_retrieval_signals(case: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+
+    def add(value: str) -> None:
+        if value and value not in values:
+            values.append(value)
+
+    if str(case.get("failure_layer") or "") == "memory_retrieval":
+        add("failure_layer")
+        add("recorded")
+
+    summary = _embedding_summary(case)
+    vector_match_count = int(summary.get("vector_match_count") or 0)
+    vector_memory_entry_count = int(summary.get("vector_memory_entry_count") or 0)
+    fallback_count = int(summary.get("fallback_count") or 0)
+    error_count = int(summary.get("error_count") or 0)
+    incompatible_count = int(summary.get("incompatible_match_count") or 0)
+
+    if vector_match_count > 0:
+        add("vector_match")
+        add("recorded")
+    if vector_memory_entry_count > 0:
+        add("vector_memory_entry")
+        add("recorded")
+    if fallback_count > 0:
+        add("fallback")
+        add("recorded")
+    if error_count > 0:
+        add("error")
+        add("recorded")
+    if incompatible_count > 0:
+        add("incompatible")
+        add("recorded")
+    for provider in _string_values(summary.get("providers")):
+        add(f"provider:{provider}")
+    for model in _string_values(summary.get("models")):
+        add(f"model:{model}")
+    return values
+
+
+def _matches_values(actual_values: list[str], expected_values: list[str]) -> bool:
+    if not expected_values:
+        return True
+    for expected in expected_values:
+        for actual in actual_values:
+            if actual == expected or fnmatch.fnmatchcase(actual, expected):
+                return True
+    return False
+
+
+def _case_matches_evidence_filters(
+    case: dict[str, Any],
+    *,
+    statuses: list[str],
+    failure_layers: list[str],
+    skills: list[str],
+    procedure_ids: list[str],
+    habit_ids: list[str],
+    lineage_skills: list[str],
+    promotion_generation_types: list[str],
+    promotion_source_targets: list[str],
+    scenario_ids: list[str],
+    categories: list[str],
+    requires: list[str],
+    skip_reasons: list[str],
+    permissions: list[str],
+    completion_layers: list[str],
+    policy_decisions: list[str],
+    skipped_stages: list[str],
+    policy_risk_flags: list[str],
+    policy_reasons: list[str],
+    policy_context_budgets: list[str],
+    request_payload_stats: list[str],
+    node_statuses: list[str],
+    critic_actions: list[str],
+    memory_retrieval_signals: list[str],
+    llm_usage_signals: list[str],
+    learning_kinds: list[str],
+    learning_validation_statuses: list[str],
+    skill_validation_statuses: list[str],
+    learning_review_decisions: list[str],
+    learning_audit_events: list[str],
+) -> bool:
+    return (
+        _matches_values([str(case.get("status") or "")], statuses)
+        and _matches_values([str(case.get("failure_layer") or "")], failure_layers)
+        and _matches_values(_string_values(case.get("used_skills")), skills)
+        and _matches_values(_procedure_ids(case), procedure_ids)
+        and _matches_values(_habit_ids(case), habit_ids)
+        and _matches_values(_lineage_skill_names(case), lineage_skills)
+        and _matches_values(_promotion_generation_types(case), promotion_generation_types)
+        and _matches_values(_promotion_source_targets(case), promotion_source_targets)
+        and _matches_values([str(case.get("scenario_id") or "")], scenario_ids)
+        and _matches_values([str(case.get("category") or "")], categories)
+        and _matches_values(_requires_values(case), requires)
+        and _matches_values(
+            [str(case.get("skip_reason") or "")] if case.get("skip_reason") else [],
+            skip_reasons,
+        )
+        and _matches_values(_permission_values(case), permissions)
+        and _matches_values(_completion_layer_filter_values(case), completion_layers)
+        and _matches_values(_policy_decisions(case), policy_decisions)
+        and _matches_values(_policy_skipped_stages(case), skipped_stages)
+        and _matches_values(_policy_risk_flags(case), policy_risk_flags)
+        and _matches_values(_policy_reasons(case), policy_reasons)
+        and _matches_values(
+            _policy_context_budget_signals(case),
+            policy_context_budgets,
+        )
+        and _matches_values(
+            _request_payload_stats_signals(case),
+            request_payload_stats,
+        )
+        and _matches_values(_node_status_signals(case), node_statuses)
+        and _matches_values(_critic_action_signals(case), critic_actions)
+        and _matches_values(_memory_retrieval_signals(case), memory_retrieval_signals)
+        and _matches_values(_llm_usage_signals(case), llm_usage_signals)
+        and _matches_values(_learning_evidence_kinds(case), learning_kinds)
+        and _matches_values(_learning_validation_statuses(case), learning_validation_statuses)
+        and _matches_values(_skill_validation_statuses(case), skill_validation_statuses)
+        and _matches_values(_learning_review_decisions(case), learning_review_decisions)
+        and _matches_values(_learning_audit_events(case), learning_audit_events)
+    )
+
+
+def _count_case_values(cases: list[dict[str, Any]], value_getter: Any) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for case in cases:
+        values = value_getter(case)
+        for value in sorted(set(str(item) for item in values if str(item))):
+            counts[value] = counts.get(value, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _artifact_path(case: dict[str, Any], kind: str) -> str | None:
+    artifacts = case.get("artifacts")
+    if not isinstance(artifacts, list):
+        return None
+    for artifact in artifacts:
+        if (
+            isinstance(artifact, dict)
+            and artifact.get("kind") == kind
+            and artifact.get("exists")
+            and artifact.get("path")
+        ):
+            return str(artifact.get("path"))
+    return None
+
+
+def _compact_evidence_case(case: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "run_id": case.get("run_id"),
+        "scenario_id": case.get("scenario_id"),
+        "category": case.get("category"),
+        "kind": case.get("kind"),
+        "requires": _requires_values(case),
+        "status": case.get("status"),
+        "skip_reason": case.get("skip_reason"),
+        "failure_layer": case.get("failure_layer"),
+        "diagnosis": case.get("diagnosis"),
+        "used_skills": _string_values(case.get("used_skills")),
+        "procedure_ids": _procedure_ids(case),
+        "habit_ids": _habit_ids(case),
+        "lineage_skill_names": _lineage_skill_names(case),
+        "promotion_generation_types": _promotion_generation_types(case),
+        "promotion_source_targets": _promotion_source_targets(case),
+        "procedure_match_summaries": _procedure_match_summaries(case),
+        "learning_validation_statuses": _learning_validation_statuses(case),
+        "skill_validation_statuses": _skill_validation_statuses(case),
+        "learning_review_decisions": _learning_review_decisions(case),
+        "learning_audit_events": _learning_audit_events(case),
+        "permission_summary": dict(case.get("permission_summary") or {}),
+        "policy_decisions": _policy_decisions(case),
+        "skipped_stages": _policy_skipped_stages(case),
+        "policy_risk_flags": _policy_risk_flags(case),
+        "policy_reasons": _policy_reasons(case),
+        "policy_context_budget_signals": _policy_context_budget_signals(case),
+        "request_payload_stats_signals": _request_payload_stats_signals(case),
+        "node_status_signals": _node_status_signals(case),
+        "critic_action_signals": _critic_action_signals(case),
+        "memory_retrieval_signals": _memory_retrieval_signals(case),
+        "llm_call_count": _case_int_value(case, "llm_call_count"),
+        "llm_total_tokens": _case_int_value(case, "llm_total_tokens"),
+        "duration_seconds": _case_float_value(case, "duration_seconds"),
+        "llm_usage_signals": _llm_usage_signals(case),
+        "embedding_providers": _string_values(_embedding_summary(case).get("providers")),
+        "embedding_models": _string_values(_embedding_summary(case).get("models")),
+        "vector_match_count": int(_embedding_summary(case).get("vector_match_count") or 0),
+        "vector_memory_entry_count": int(
+            _embedding_summary(case).get("vector_memory_entry_count") or 0
+        ),
+        "embedding_fallback_count": int(_embedding_summary(case).get("fallback_count") or 0),
+        "embedding_error_count": int(_embedding_summary(case).get("error_count") or 0),
+        "embedding_incompatible_match_count": int(
+            _embedding_summary(case).get("incompatible_match_count") or 0
+        ),
+        "learning_evidence_kinds": _learning_evidence_kinds(case),
+        "task_ids": _string_values(case.get("task_ids")),
+        "thread_ids": _string_values(case.get("thread_ids")),
+        "completion_failure_layers": _completion_layers(case),
+        "model_capability_suspected": bool(case.get("model_capability_suspected")),
+        "learning_evidence_count": _learning_evidence_count(case),
+        "diagnostics_path": _artifact_path(case, "diagnostics"),
+        "result_path": _artifact_path(case, "case_result"),
+    }
+
+
+def query_evidence_index(
+    payload: dict[str, Any],
+    *,
+    statuses: list[str] | None = None,
+    failure_layers: list[str] | None = None,
+    skills: list[str] | None = None,
+    procedure_ids: list[str] | None = None,
+    habit_ids: list[str] | None = None,
+    lineage_skills: list[str] | None = None,
+    promotion_generation_types: list[str] | None = None,
+    promotion_source_targets: list[str] | None = None,
+    scenario_ids: list[str] | None = None,
+    categories: list[str] | None = None,
+    requires: list[str] | None = None,
+    skip_reasons: list[str] | None = None,
+    permissions: list[str] | None = None,
+    completion_layers: list[str] | None = None,
+    policy_decisions: list[str] | None = None,
+    skipped_stages: list[str] | None = None,
+    policy_risk_flags: list[str] | None = None,
+    policy_reasons: list[str] | None = None,
+    policy_context_budgets: list[str] | None = None,
+    request_payload_stats: list[str] | None = None,
+    node_statuses: list[str] | None = None,
+    critic_actions: list[str] | None = None,
+    memory_retrieval_signals: list[str] | None = None,
+    llm_usage_signals: list[str] | None = None,
+    learning_kinds: list[str] | None = None,
+    learning_validation_statuses: list[str] | None = None,
+    skill_validation_statuses: list[str] | None = None,
+    learning_review_decisions: list[str] | None = None,
+    learning_audit_events: list[str] | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    cases = [item for item in payload.get("cases", []) if isinstance(item, dict)]
+    filters = {
+        "status": _split_filter_values(statuses),
+        "failure_layer": _split_filter_values(failure_layers),
+        "skill": _split_filter_values(skills),
+        "procedure": _split_filter_values(procedure_ids),
+        "habit": _split_filter_values(habit_ids),
+        "lineage_skill": _split_filter_values(lineage_skills),
+        "promotion_generation_type": _split_filter_values(promotion_generation_types),
+        "promotion_source_target": _split_filter_values(promotion_source_targets),
+        "scenario": _split_filter_values(scenario_ids),
+        "category": _split_filter_values(categories),
+        "requires": _split_filter_values(requires),
+        "skip_reason": _split_filter_values(skip_reasons),
+        "permission": _split_filter_values(permissions),
+        "completion_layer": _split_filter_values(completion_layers),
+        "policy_decision": _split_filter_values(policy_decisions),
+        "skipped_stage": _split_filter_values(skipped_stages),
+        "policy_risk_flag": _split_filter_values(policy_risk_flags),
+        "policy_reason": _split_filter_values(policy_reasons),
+        "policy_context_budget": _split_filter_values(policy_context_budgets),
+        "request_payload_stats": _split_filter_values(request_payload_stats),
+        "node_status": _split_filter_values(node_statuses),
+        "critic_action": _split_filter_values(critic_actions),
+        "memory_retrieval": _split_filter_values(memory_retrieval_signals),
+        "llm_usage": _split_filter_values(llm_usage_signals),
+        "learning_kind": _split_filter_values(learning_kinds),
+        "learning_validation": _split_filter_values(learning_validation_statuses),
+        "skill_validation": _split_filter_values(skill_validation_statuses),
+        "learning_review_decision": _split_filter_values(learning_review_decisions),
+        "learning_audit_event": _split_filter_values(learning_audit_events),
+    }
+    matched = [
+        case
+        for case in cases
+        if _case_matches_evidence_filters(
+            case,
+            statuses=filters["status"],
+            failure_layers=filters["failure_layer"],
+            skills=filters["skill"],
+            procedure_ids=filters["procedure"],
+            habit_ids=filters["habit"],
+            lineage_skills=filters["lineage_skill"],
+            promotion_generation_types=filters["promotion_generation_type"],
+            promotion_source_targets=filters["promotion_source_target"],
+            scenario_ids=filters["scenario"],
+            categories=filters["category"],
+            requires=filters["requires"],
+            skip_reasons=filters["skip_reason"],
+            permissions=filters["permission"],
+            completion_layers=filters["completion_layer"],
+            policy_decisions=filters["policy_decision"],
+            skipped_stages=filters["skipped_stage"],
+            policy_risk_flags=filters["policy_risk_flag"],
+            policy_reasons=filters["policy_reason"],
+            policy_context_budgets=filters["policy_context_budget"],
+            request_payload_stats=filters["request_payload_stats"],
+            node_statuses=filters["node_status"],
+            critic_actions=filters["critic_action"],
+            memory_retrieval_signals=filters["memory_retrieval"],
+            llm_usage_signals=filters["llm_usage"],
+            learning_kinds=filters["learning_kind"],
+            learning_validation_statuses=filters["learning_validation"],
+            skill_validation_statuses=filters["skill_validation"],
+            learning_review_decisions=filters["learning_review_decision"],
+            learning_audit_events=filters["learning_audit_event"],
+        )
+    ]
+    returned = matched if limit is None or limit <= 0 else matched[:limit]
+    summary = {
+        "source_run_count": payload.get("run_count", len(payload.get("runs", []))),
+        "total_index_cases": len(cases),
+        "matched_cases": len(matched),
+        "returned_cases": len(returned),
+        "by_status": _count_case_values(matched, lambda case: [case.get("status", "unknown")]),
+        "by_scenario": _count_case_values(
+            matched,
+            lambda case: [case.get("scenario_id", "unknown")],
+        ),
+        "by_category": _count_case_values(
+            matched,
+            lambda case: [case.get("category", "uncategorized")],
+        ),
+        "by_requires": _count_case_values(matched, _requires_values),
+        "by_skip_reason": _count_case_values(
+            matched,
+            lambda case: [case.get("skip_reason")] if case.get("skip_reason") else [],
+        ),
+        "by_failure_layer": _count_case_values(
+            matched,
+            lambda case: [case.get("failure_layer", "unknown")],
+        ),
+        "by_skill": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("used_skills")),
+        ),
+        "by_procedure": _count_case_values(matched, _procedure_ids),
+        "by_habit": _count_case_values(matched, _habit_ids),
+        "by_lineage_skill": _count_case_values(matched, _lineage_skill_names),
+        "by_promotion_generation_type": _count_case_values(
+            matched,
+            _promotion_generation_types,
+        ),
+        "by_promotion_source_target": _count_case_values(
+            matched,
+            _promotion_source_targets,
+        ),
+        "by_permission": _count_case_values(matched, _permission_values),
+        "by_completion_layer": _count_case_values(matched, _completion_layers),
+        "by_policy_decision": _count_case_values(matched, _policy_decisions),
+        "by_skipped_stage": _count_case_values(matched, _policy_skipped_stages),
+        "by_policy_risk_flag": _count_case_values(matched, _policy_risk_flags),
+        "by_policy_reason": _count_case_values(matched, _policy_reasons),
+        "by_policy_context_budget": _count_case_values(
+            matched,
+            _policy_context_budget_signals,
+        ),
+        "by_request_payload_stats": _count_case_values(
+            matched,
+            _request_payload_stats_signals,
+        ),
+        "by_node_status": _count_case_values(matched, _node_status_signals),
+        "by_critic_action": _count_case_values(matched, _critic_action_signals),
+        "by_memory_retrieval": _count_case_values(matched, _memory_retrieval_signals),
+        "by_llm_usage": _count_case_values(matched, _llm_usage_signals),
+        "by_learning_kind": _count_case_values(matched, _learning_evidence_kinds),
+        "by_learning_validation": _count_case_values(matched, _learning_validation_statuses),
+        "by_skill_validation": _count_case_values(matched, _skill_validation_statuses),
+        "by_learning_review_decision": _count_case_values(
+            matched,
+            _learning_review_decisions,
+        ),
+        "by_learning_audit_event": _count_case_values(matched, _learning_audit_events),
+    }
+    return {
+        "schema_version": EVIDENCE_QUERY_SCHEMA_VERSION,
+        "source_schema_version": payload.get("schema_version"),
+        "run_root": payload.get("run_root"),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "filters": filters,
+        "summary": summary,
+        "cases": [_compact_evidence_case(case) for case in returned],
+    }
+
+
+def _markdown_value_list(values: list[str]) -> str:
+    return ", ".join(f"`{value}`" for value in values) or "-"
+
+
+def _markdown_count_line(label: str, counts: dict[str, int]) -> str:
+    if not counts:
+        return f"- {label}: -"
+    pairs = ", ".join(f"`{key}`={value}" for key, value in counts.items())
+    return f"- {label}: {pairs}"
+
+
+def _markdown_cell(value: Any) -> str:
+    return str(value if value is not None else "-").replace("\n", " ").replace("|", "\\|")
+
+
+def render_evidence_query_markdown(payload: dict[str, Any]) -> str:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    filters = payload.get("filters") if isinstance(payload.get("filters"), dict) else {}
+    lines = [
+        "# Eval Evidence Query",
+        "",
+        f"- run_root: `{payload.get('run_root')}`",
+        f"- generated_at: `{payload.get('generated_at')}`",
+        f"- source_schema_version: `{payload.get('source_schema_version')}`",
+        f"- total_index_cases: {summary.get('total_index_cases', 0)}",
+        f"- matched_cases: {summary.get('matched_cases', 0)}",
+        f"- returned_cases: {summary.get('returned_cases', 0)}",
+        "",
+        "## Filters",
+        "",
+    ]
+    active_filter_count = 0
+    for key in [
+        "status",
+        "failure_layer",
+        "skill",
+        "procedure",
+        "habit",
+        "lineage_skill",
+        "promotion_generation_type",
+        "promotion_source_target",
+        "scenario",
+        "category",
+        "requires",
+        "skip_reason",
+        "permission",
+        "completion_layer",
+        "policy_decision",
+        "skipped_stage",
+        "policy_risk_flag",
+        "policy_reason",
+        "policy_context_budget",
+        "request_payload_stats",
+        "node_status",
+        "critic_action",
+        "memory_retrieval",
+        "llm_usage",
+        "learning_kind",
+        "learning_validation",
+        "skill_validation",
+        "learning_review_decision",
+        "learning_audit_event",
+    ]:
+        values = _string_values(filters.get(key))
+        if values:
+            active_filter_count += 1
+            lines.append(f"- {key}: {_markdown_value_list(values)}")
+    if active_filter_count == 0:
+        lines.append("- none")
+
+    lines.extend(
+        [
+            "",
+            "## Summary",
+            "",
+            _markdown_count_line("status", summary.get("by_status", {})),
+            _markdown_count_line("scenario", summary.get("by_scenario", {})),
+            _markdown_count_line("category", summary.get("by_category", {})),
+            _markdown_count_line("requires", summary.get("by_requires", {})),
+            _markdown_count_line("skip_reason", summary.get("by_skip_reason", {})),
+            _markdown_count_line("failure_layer", summary.get("by_failure_layer", {})),
+            _markdown_count_line("skill", summary.get("by_skill", {})),
+            _markdown_count_line("procedure", summary.get("by_procedure", {})),
+            _markdown_count_line("habit", summary.get("by_habit", {})),
+            _markdown_count_line("lineage_skill", summary.get("by_lineage_skill", {})),
+            _markdown_count_line(
+                "promotion_generation_type",
+                summary.get("by_promotion_generation_type", {}),
+            ),
+            _markdown_count_line(
+                "promotion_source_target",
+                summary.get("by_promotion_source_target", {}),
+            ),
+            _markdown_count_line("permission", summary.get("by_permission", {})),
+            _markdown_count_line("completion_layer", summary.get("by_completion_layer", {})),
+            _markdown_count_line("policy_decision", summary.get("by_policy_decision", {})),
+            _markdown_count_line("skipped_stage", summary.get("by_skipped_stage", {})),
+            _markdown_count_line(
+                "policy_risk_flag",
+                summary.get("by_policy_risk_flag", {}),
+            ),
+            _markdown_count_line("policy_reason", summary.get("by_policy_reason", {})),
+            _markdown_count_line(
+                "policy_context_budget",
+                summary.get("by_policy_context_budget", {}),
+            ),
+            _markdown_count_line(
+                "request_payload_stats",
+                summary.get("by_request_payload_stats", {}),
+            ),
+            _markdown_count_line("node_status", summary.get("by_node_status", {})),
+            _markdown_count_line("critic_action", summary.get("by_critic_action", {})),
+            _markdown_count_line(
+                "memory_retrieval",
+                summary.get("by_memory_retrieval", {}),
+            ),
+            _markdown_count_line("llm_usage", summary.get("by_llm_usage", {})),
+            _markdown_count_line("learning_kind", summary.get("by_learning_kind", {})),
+            _markdown_count_line(
+                "learning_validation",
+                summary.get("by_learning_validation", {}),
+            ),
+            _markdown_count_line("skill_validation", summary.get("by_skill_validation", {})),
+            _markdown_count_line(
+                "learning_review_decision",
+                summary.get("by_learning_review_decision", {}),
+            ),
+            _markdown_count_line(
+                "learning_audit_event",
+                summary.get("by_learning_audit_event", {}),
+            ),
+            "",
+            "## Cases",
+            "",
+            "| Run | Scenario | Category | Requires | Status | Skip Reason | Failure Layer | Completion Layers | Policy Decisions | Skipped Stages | Policy Risk Flags | Policy Reasons | Policy Context Budget | Request Payload Stats | Node Status | Critic Actions | Memory Retrieval | LLM Usage | Skills | Procedures | Habits | Lineage Skills | Promotion Types | Promotion Targets | Learning Validation | Skill Validation | Review Decisions | Audit Events | Permissions | Learning Kinds | Diagnostics |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
+    for case in payload.get("cases", []):
+        if not isinstance(case, dict):
+            continue
+        diagnostics = "-"
+        if case.get("diagnostics_path"):
+            diagnostics = f"[diagnostics]({case.get('diagnostics_path')})"
+        lines.append(
+            f"| `{_markdown_cell(case.get('run_id'))}` | "
+            f"`{_markdown_cell(case.get('scenario_id'))}` | "
+            f"{_markdown_cell(case.get('category'))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('requires'))))} | "
+            f"{_markdown_cell(case.get('status'))} | "
+            f"{_markdown_cell(case.get('skip_reason'))} | "
+            f"{_markdown_cell(case.get('failure_layer'))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('completion_failure_layers'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('policy_decisions'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('skipped_stages'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('policy_risk_flags'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('policy_reasons'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('policy_context_budget_signals'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('request_payload_stats_signals'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('node_status_signals'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('critic_action_signals'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('memory_retrieval_signals'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('llm_usage_signals'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('used_skills'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('procedure_ids'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('habit_ids'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('lineage_skill_names'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('promotion_generation_types'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('promotion_source_targets'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('learning_validation_statuses'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('skill_validation_statuses'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('learning_review_decisions'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('learning_audit_events'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(list((case.get('permission_summary') or {}).keys()))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('learning_evidence_kinds'))))} | "
+            f"{diagnostics} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _dashboard_query_command(filter_name: str, value: str | None = None) -> str:
+    base = "poetry run python scripts/run_real_world_evals.py --query-evidence-index"
+    if value is None:
+        return base
+    return f"{base} --{filter_name} {value}"
+
+
+def _dashboard_filter_value(value: str) -> str:
+    return shlex.quote(str(value))
+
+
+def _dashboard_scenario_run_command(scenario_id: str, requires: list[str]) -> str:
+    required = {str(item).strip().lower() for item in requires if str(item).strip()}
+    parts = ["poetry run python scripts/run_real_world_evals.py"]
+    if "network" in required:
+        parts.append("--include-network")
+    if "l4" in required:
+        parts.append("--include-l4")
+    if "complex" in required:
+        parts.append("--include-complex")
+    parts.extend(["--scenario", shlex.quote(str(scenario_id))])
+    return " ".join(parts)
+
+
+def _dashboard_hotspot_signal(value: str) -> bool:
+    signal = str(value).strip()
+    return (
+        signal.endswith(":items:21+")
+        or signal.endswith(":json_chars:10000-49999")
+        or signal.endswith(":json_chars:50000+")
+    )
+
+
+def _failure_layer_repair_hint(layer: str) -> str:
+    hints = {
+        "routing": "先看 interaction router 与 turn trace。",
+        "planning": "先看 plan artifact、planner prompt 输入和 selected skill。",
+        "permission": "先看 permission summary、policy decision 和 max_permission。",
+        "skill_or_tool": "先看 node output、skill contract、executor 错误和输入 payload。",
+        "task_flow_or_output": "先看 workspace artifacts、completion evaluation 和 expected output。",
+        "memory_retrieval": "先看 vector recall、procedure match 和 context snapshot。",
+        "completion_evaluation": "先看 completion/evaluation.json 和 failure attribution。",
+        "model_capability": "先确认工具证据已给足，再记录模型能力边界。",
+        "assertion": "先核对 scenario assertions 与真实产物。",
+        "infrastructure": "先看命令退出码、超时、环境和依赖。",
+        "none": "通过或跳过 case；无需失败修复入口。",
+    }
+    return hints.get(layer, "先看 diagnostics.md、result.json 和 workspace artifacts。")
+
+
+def _learning_lineage_query(payload: dict[str, Any], *, limit: int) -> dict[str, Any]:
+    base = query_evidence_index(payload, limit=0)
+    cases = [
+        case
+        for case in base.get("cases", [])
+        if case.get("procedure_ids") or case.get("habit_ids") or case.get("lineage_skill_names")
+    ]
+    returned = cases if limit <= 0 else cases[:limit]
+    summary = dict(base.get("summary") or {})
+    summary["matched_cases"] = len(cases)
+    summary["returned_cases"] = len(returned)
+    summary["by_status"] = _count_case_values(
+        returned, lambda case: [case.get("status", "unknown")]
+    )
+    summary["by_scenario"] = _count_case_values(
+        returned, lambda case: [case.get("scenario_id", "unknown")]
+    )
+    summary["by_category"] = _count_case_values(
+        returned,
+        lambda case: [case.get("category", "uncategorized")],
+    )
+    summary["by_requires"] = _count_case_values(returned, _requires_values)
+    summary["by_skip_reason"] = _count_case_values(
+        returned,
+        lambda case: [case.get("skip_reason")] if case.get("skip_reason") else [],
+    )
+    summary["by_failure_layer"] = _count_case_values(
+        returned,
+        lambda case: [case.get("failure_layer", "unknown")],
+    )
+    summary["by_skill"] = _count_case_values(
+        returned,
+        lambda case: _string_values(case.get("used_skills")),
+    )
+    summary["by_procedure"] = _count_case_values(
+        returned,
+        lambda case: _string_values(case.get("procedure_ids")),
+    )
+    summary["by_habit"] = _count_case_values(
+        returned,
+        lambda case: _string_values(case.get("habit_ids")),
+    )
+    summary["by_lineage_skill"] = _count_case_values(
+        returned,
+        lambda case: _string_values(case.get("lineage_skill_names")),
+    )
+    summary["by_promotion_generation_type"] = _count_case_values(
+        returned,
+        lambda case: _string_values(case.get("promotion_generation_types")),
+    )
+    summary["by_promotion_source_target"] = _count_case_values(
+        returned,
+        lambda case: _string_values(case.get("promotion_source_targets")),
+    )
+    summary["by_policy_decision"] = _count_case_values(
+        returned,
+        lambda case: _string_values(case.get("policy_decisions")),
+    )
+    summary["by_skipped_stage"] = _count_case_values(
+        returned,
+        lambda case: _string_values(case.get("skipped_stages")),
+    )
+    summary["by_policy_risk_flag"] = _count_case_values(
+        returned,
+        lambda case: _string_values(case.get("policy_risk_flags")),
+    )
+    summary["by_policy_reason"] = _count_case_values(
+        returned,
+        lambda case: _string_values(case.get("policy_reasons")),
+    )
+    summary["by_policy_context_budget"] = _count_case_values(
+        returned,
+        lambda case: _string_values(case.get("policy_context_budget_signals")),
+    )
+    summary["by_request_payload_stats"] = _count_case_values(
+        returned,
+        lambda case: _string_values(case.get("request_payload_stats_signals")),
+    )
+    summary["by_node_status"] = _count_case_values(
+        returned,
+        lambda case: _string_values(case.get("node_status_signals")),
+    )
+    summary["by_critic_action"] = _count_case_values(
+        returned,
+        lambda case: _string_values(case.get("critic_action_signals")),
+    )
+    summary["by_llm_usage"] = _count_case_values(returned, _llm_usage_signals)
+    return {
+        "schema_version": EVIDENCE_QUERY_SCHEMA_VERSION,
+        "source_schema_version": payload.get("schema_version"),
+        "run_root": payload.get("run_root"),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "filters": {"learning_lineage": ["any"]},
+        "summary": summary,
+        "cases": returned,
+    }
+
+
+def _dashboard_filtered_query(
+    payload: dict[str, Any],
+    *,
+    filters: dict[str, list[str]],
+    predicate: Any,
+    limit: int,
+) -> dict[str, Any]:
+    source_cases = [item for item in payload.get("cases", []) if isinstance(item, dict)]
+    matched_source = [case for case in source_cases if predicate(case)]
+    matched = [_compact_evidence_case(case) for case in matched_source]
+    returned = matched if limit <= 0 else matched[:limit]
+    summary = {
+        "source_run_count": payload.get("run_count", len(payload.get("runs", []))),
+        "total_index_cases": len(source_cases),
+        "matched_cases": len(matched),
+        "returned_cases": len(returned),
+        "by_status": _count_case_values(matched, lambda case: [case.get("status", "unknown")]),
+        "by_scenario": _count_case_values(
+            matched,
+            lambda case: [case.get("scenario_id", "unknown")],
+        ),
+        "by_category": _count_case_values(
+            matched,
+            lambda case: [case.get("category", "uncategorized")],
+        ),
+        "by_requires": _count_case_values(matched, _requires_values),
+        "by_skip_reason": _count_case_values(
+            matched,
+            lambda case: [case.get("skip_reason")] if case.get("skip_reason") else [],
+        ),
+        "by_failure_layer": _count_case_values(
+            matched,
+            lambda case: [case.get("failure_layer", "unknown")],
+        ),
+        "by_skill": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("used_skills")),
+        ),
+        "by_procedure": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("procedure_ids")),
+        ),
+        "by_habit": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("habit_ids")),
+        ),
+        "by_lineage_skill": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("lineage_skill_names")),
+        ),
+        "by_promotion_generation_type": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("promotion_generation_types")),
+        ),
+        "by_promotion_source_target": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("promotion_source_targets")),
+        ),
+        "by_permission": _count_case_values(
+            matched,
+            lambda case: _string_values(list((case.get("permission_summary") or {}).keys())),
+        ),
+        "by_completion_layer": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("completion_failure_layers")),
+        ),
+        "by_policy_decision": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("policy_decisions")),
+        ),
+        "by_skipped_stage": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("skipped_stages")),
+        ),
+        "by_policy_risk_flag": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("policy_risk_flags")),
+        ),
+        "by_policy_reason": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("policy_reasons")),
+        ),
+        "by_policy_context_budget": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("policy_context_budget_signals")),
+        ),
+        "by_request_payload_stats": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("request_payload_stats_signals")),
+        ),
+        "by_node_status": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("node_status_signals")),
+        ),
+        "by_critic_action": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("critic_action_signals")),
+        ),
+        "by_memory_retrieval": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("memory_retrieval_signals")),
+        ),
+        "by_llm_usage": _count_case_values(matched, _llm_usage_signals),
+        "by_learning_kind": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("learning_evidence_kinds")),
+        ),
+        "by_learning_validation": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("learning_validation_statuses")),
+        ),
+        "by_skill_validation": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("skill_validation_statuses")),
+        ),
+        "by_learning_review_decision": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("learning_review_decisions")),
+        ),
+        "by_learning_audit_event": _count_case_values(
+            matched,
+            lambda case: _string_values(case.get("learning_audit_events")),
+        ),
+    }
+    return {
+        "schema_version": EVIDENCE_QUERY_SCHEMA_VERSION,
+        "source_schema_version": payload.get("schema_version"),
+        "run_root": payload.get("run_root"),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "filters": filters,
+        "summary": summary,
+        "cases": returned,
+    }
+
+
+def _dashboard_regression_commands(
+    repair_entrypoints: list[dict[str, Any]],
+    views: dict[str, dict[str, Any]],
+    dashboard_summary: dict[str, Any],
+    source_cases: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    commands = [
+        {
+            "kind": "scenario_check",
+            "label": "Validate scenario definitions",
+            "command": "poetry run python scripts/run_real_world_evals.py --check-only",
+            "matched_cases": 0,
+        },
+        {
+            "kind": "evidence_index",
+            "label": "Rebuild evidence index from eval_runs",
+            "command": "poetry run python scripts/run_real_world_evals.py --build-evidence-index",
+            "matched_cases": 0,
+        },
+        {
+            "kind": "dashboard",
+            "label": "Render evidence dashboard",
+            "command": "poetry run python scripts/run_real_world_evals.py --evidence-dashboard",
+            "matched_cases": 0,
+        },
+    ]
+    seen = {str(item["command"]) for item in commands}
+
+    for item in repair_entrypoints:
+        command = str(item.get("query_command") or "").strip()
+        if not command or command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "repair_query",
+                "label": f"Repair {item.get('failure_layer') or 'unknown'} cases",
+                "command": command,
+                "matched_cases": int(item.get("case_count") or 0),
+            }
+        )
+
+    failed_scenario_commands: dict[str, dict[str, Any]] = {}
+    for case in source_cases or []:
+        if not isinstance(case, dict) or case.get("status") != "failed":
+            continue
+        scenario_id = str(case.get("scenario_id") or "").strip()
+        if not scenario_id:
+            continue
+        command = _dashboard_scenario_run_command(scenario_id, _requires_values(case))
+        entry = failed_scenario_commands.setdefault(
+            command,
+            {
+                "kind": "scenario_rerun",
+                "label": f"Rerun scenario {scenario_id}",
+                "command": command,
+                "matched_cases": 0,
+            },
+        )
+        entry["matched_cases"] = int(entry["matched_cases"]) + 1
+    for item in sorted(
+        failed_scenario_commands.values(),
+        key=lambda command: str(command.get("label") or ""),
+    ):
+        command = str(item.get("command") or "").strip()
+        if not command or command in seen:
+            continue
+        seen.add(command)
+        commands.append(item)
+
+    for key, view in views.items():
+        query = view.get("query") if isinstance(view.get("query"), dict) else {}
+        query_summary = query.get("summary") if isinstance(query.get("summary"), dict) else {}
+        matched_cases = int(query_summary.get("matched_cases") or 0)
+        command = str(view.get("query_command") or "").strip()
+        if not command or command in seen or matched_cases <= 0:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "dashboard_view_query",
+                "view": key,
+                "label": str(view.get("title") or key),
+                "command": command,
+                "matched_cases": matched_cases,
+            }
+        )
+
+    for status, count in sorted((dashboard_summary.get("by_status") or {}).items()):
+        status = str(status).strip()
+        if not status:
+            continue
+        command = _dashboard_query_command("evidence-status", _dashboard_filter_value(status))
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "status_query",
+                "label": f"Status {status}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for scenario, count in sorted((dashboard_summary.get("by_scenario") or {}).items()):
+        scenario = str(scenario).strip()
+        if not scenario:
+            continue
+        command = _dashboard_query_command("evidence-scenario", _dashboard_filter_value(scenario))
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "scenario_query",
+                "label": f"Scenario {scenario}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for category, count in sorted((dashboard_summary.get("by_category") or {}).items()):
+        category = str(category).strip()
+        if not category:
+            continue
+        command = _dashboard_query_command("evidence-category", _dashboard_filter_value(category))
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "category_query",
+                "label": f"Category {category}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for requires, count in sorted((dashboard_summary.get("by_requires") or {}).items()):
+        requires = str(requires).strip()
+        if not requires:
+            continue
+        command = _dashboard_query_command("evidence-requires", _dashboard_filter_value(requires))
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "requires_query",
+                "label": f"Requires {requires}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for reason, count in sorted((dashboard_summary.get("by_skip_reason") or {}).items()):
+        reason = str(reason).strip()
+        if not reason:
+            continue
+        command = _dashboard_query_command("evidence-skip-reason", _dashboard_filter_value(reason))
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "skip_reason_query",
+                "label": f"Skip reason {reason}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for skill, count in sorted((dashboard_summary.get("by_skill") or {}).items()):
+        skill = str(skill).strip()
+        if not skill:
+            continue
+        command = _dashboard_query_command("evidence-skill", _dashboard_filter_value(skill))
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "skill_query",
+                "label": f"Skill {skill}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for procedure_id, count in sorted((dashboard_summary.get("by_procedure") or {}).items()):
+        procedure_id = str(procedure_id).strip()
+        if not procedure_id:
+            continue
+        command = _dashboard_query_command(
+            "evidence-procedure",
+            _dashboard_filter_value(procedure_id),
+        )
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "procedure_query",
+                "label": f"Procedure {procedure_id}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for habit_id, count in sorted((dashboard_summary.get("by_habit") or {}).items()):
+        habit_id = str(habit_id).strip()
+        if not habit_id:
+            continue
+        command = _dashboard_query_command(
+            "evidence-habit",
+            _dashboard_filter_value(habit_id),
+        )
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "habit_query",
+                "label": f"Habit {habit_id}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for skill, count in sorted((dashboard_summary.get("by_lineage_skill") or {}).items()):
+        skill = str(skill).strip()
+        if not skill:
+            continue
+        command = _dashboard_query_command(
+            "evidence-lineage-skill",
+            _dashboard_filter_value(skill),
+        )
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "lineage_skill_query",
+                "label": f"Lineage skill {skill}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for generation_type, count in sorted(
+        (dashboard_summary.get("by_promotion_generation_type") or {}).items()
+    ):
+        generation_type = str(generation_type).strip()
+        if not generation_type:
+            continue
+        command = _dashboard_query_command(
+            "evidence-promotion-generation-type",
+            _dashboard_filter_value(generation_type),
+        )
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "promotion_generation_type_query",
+                "label": f"Promotion generation type {generation_type}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for target, count in sorted((dashboard_summary.get("by_promotion_source_target") or {}).items()):
+        if not str(target).strip():
+            continue
+        command = _dashboard_query_command(
+            "evidence-promotion-source-target",
+            _dashboard_filter_value(str(target)),
+        )
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "promotion_source_target_query",
+                "label": f"Promotion source target {target}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for permission, count in sorted((dashboard_summary.get("by_permission") or {}).items()):
+        permission = str(permission).strip()
+        if not permission:
+            continue
+        command = _dashboard_query_command("evidence-permission", _dashboard_filter_value(permission))
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "permission_query",
+                "label": f"Permission {permission}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for layer, count in sorted((dashboard_summary.get("by_completion_layer") or {}).items()):
+        layer = str(layer).strip()
+        if not layer or layer == "none":
+            continue
+        command = _dashboard_query_command("evidence-completion-layer", layer)
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "completion_layer_query",
+                "label": f"Completion layer {layer}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for decision, count in sorted((dashboard_summary.get("by_policy_decision") or {}).items()):
+        if not str(decision).strip():
+            continue
+        command = _dashboard_query_command("evidence-policy-decision", str(decision))
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "policy_decision_query",
+                "label": f"Policy decision {decision}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for stage, count in sorted((dashboard_summary.get("by_skipped_stage") or {}).items()):
+        if not str(stage).strip():
+            continue
+        command = _dashboard_query_command("evidence-skipped-stage", str(stage))
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "skipped_stage_query",
+                "label": f"Skipped stage {stage}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for flag, count in sorted((dashboard_summary.get("by_policy_risk_flag") or {}).items()):
+        if not str(flag).strip():
+            continue
+        command = _dashboard_query_command("evidence-policy-risk-flag", str(flag))
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "policy_risk_flag_query",
+                "label": f"Policy risk flag {flag}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for reason, count in sorted((dashboard_summary.get("by_policy_reason") or {}).items()):
+        reason = str(reason).strip()
+        if not reason:
+            continue
+        command = _dashboard_query_command(
+            "evidence-policy-reason",
+            _dashboard_filter_value(reason),
+        )
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "policy_reason_query",
+                "label": f"Policy reason {reason}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for signal, count in sorted((dashboard_summary.get("by_policy_context_budget") or {}).items()):
+        signal = str(signal).strip()
+        if not _dashboard_hotspot_signal(signal):
+            continue
+        command = _dashboard_query_command(
+            "evidence-policy-context-budget",
+            _dashboard_filter_value(signal),
+        )
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "policy_context_budget_query",
+                "label": f"Policy context budget {signal}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for signal, count in sorted((dashboard_summary.get("by_request_payload_stats") or {}).items()):
+        signal = str(signal).strip()
+        if not _dashboard_hotspot_signal(signal):
+            continue
+        command = _dashboard_query_command(
+            "evidence-request-payload-stats",
+            _dashboard_filter_value(signal),
+        )
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "request_payload_stats_query",
+                "label": f"Request payload stats {signal}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for status, count in sorted((dashboard_summary.get("by_node_status") or {}).items()):
+        status = str(status).strip()
+        if not (
+            status.startswith("status:")
+            or status.startswith("attempts:")
+            or status.startswith("error:")
+        ):
+            continue
+        command = _dashboard_query_command("evidence-node-status", status)
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "node_status_query",
+                "label": f"Node status {status}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for action, count in sorted((dashboard_summary.get("by_critic_action") or {}).items()):
+        action = str(action).strip()
+        if not action.startswith("action:"):
+            continue
+        command = _dashboard_query_command("evidence-critic-action", action)
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "critic_action_query",
+                "label": f"Critic action {action}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    memory_retrieval_dynamic_signals = {
+        "failure_layer",
+        "vector_match",
+        "vector_memory_entry",
+        "fallback",
+        "error",
+        "incompatible",
+    }
+    for signal, count in sorted((dashboard_summary.get("by_memory_retrieval") or {}).items()):
+        signal = str(signal).strip()
+        if signal not in memory_retrieval_dynamic_signals:
+            continue
+        command = _dashboard_query_command("evidence-memory-retrieval", signal)
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "memory_retrieval_query",
+                "label": f"Memory retrieval {signal}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for signal, count in sorted((dashboard_summary.get("by_llm_usage") or {}).items()):
+        signal = str(signal).strip()
+        if not (
+            signal in {"llm_called", "no_llm", "llm_unknown"}
+            or signal.startswith("tokens:")
+            or signal.startswith("duration:")
+        ):
+            continue
+        command = _dashboard_query_command("evidence-llm-usage", signal)
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "llm_usage_query",
+                "label": f"LLM usage {signal}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for kind, count in sorted((dashboard_summary.get("by_learning_kind") or {}).items()):
+        kind = str(kind).strip()
+        if not kind:
+            continue
+        command = _dashboard_query_command("evidence-learning-kind", kind)
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "learning_kind_query",
+                "label": f"Learning evidence kind {kind}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for status, count in sorted((dashboard_summary.get("by_learning_validation") or {}).items()):
+        status = str(status).strip()
+        if not status:
+            continue
+        command = _dashboard_query_command("evidence-learning-validation", status)
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "learning_validation_query",
+                "label": f"Learning validation {status}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for status, count in sorted((dashboard_summary.get("by_skill_validation") or {}).items()):
+        status = str(status).strip()
+        if not status:
+            continue
+        command = _dashboard_query_command("evidence-skill-validation", status)
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "skill_validation_query",
+                "label": f"Skill validation {status}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for decision, count in sorted(
+        (dashboard_summary.get("by_learning_review_decision") or {}).items()
+    ):
+        decision = str(decision).strip()
+        if not decision:
+            continue
+        command = _dashboard_query_command("evidence-learning-review-decision", decision)
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "learning_review_decision_query",
+                "label": f"Learning review decision {decision}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for event, count in sorted((dashboard_summary.get("by_learning_audit_event") or {}).items()):
+        event = str(event).strip()
+        if not event:
+            continue
+        command = _dashboard_query_command("evidence-learning-audit-event", event)
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "learning_audit_event_query",
+                "label": f"Learning audit event {event}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    return commands
+
+
+def _has_habit_fast_path(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+    fast_paths = learning.get("habit_fast_paths")
+    return isinstance(fast_paths, list) and any(isinstance(item, dict) for item in fast_paths)
+
+
+def _has_learning_match_explanation_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+    matches = learning.get("procedure_matches")
+    return isinstance(matches, list) and any(isinstance(item, dict) for item in matches)
+
+
+def _has_permission_governance_evidence(case: dict[str, Any]) -> bool:
+    if str(case.get("failure_layer") or "") == "permission":
+        return True
+    summary = case.get("permission_summary")
+    return isinstance(summary, dict) and bool(summary)
+
+
+def _has_policy_decision_evidence(case: dict[str, Any]) -> bool:
+    return bool(_policy_decisions(case))
+
+
+def _has_policy_risk_flag_evidence(case: dict[str, Any]) -> bool:
+    return bool(_policy_risk_flags(case))
+
+
+def _has_model_capability_evidence(case: dict[str, Any]) -> bool:
+    if str(case.get("failure_layer") or "") == "model_capability":
+        return True
+    if bool(case.get("model_capability_suspected")):
+        return True
+    return "model_capability" in _string_values(case.get("completion_failure_layers"))
+
+
+def _has_completion_evaluation_evidence(case: dict[str, Any]) -> bool:
+    if str(case.get("failure_layer") or "") == "completion_evaluation":
+        return True
+    return any(layer and layer != "none" for layer in _completion_layers(case))
+
+
+def _has_memory_retrieval_evidence(case: dict[str, Any]) -> bool:
+    return bool(_memory_retrieval_signals(case))
+
+
+def _has_llm_usage_evidence(case: dict[str, Any]) -> bool:
+    return "llm_called" in _llm_usage_signals(case)
+
+
+def _has_skill_approval_gate_evidence(case: dict[str, Any]) -> bool:
+    generated_skills = _string_values(case.get("used_skills")) + _lineage_skill_names(case)
+    if not any(fnmatch.fnmatchcase(skill, "generated.habit.*") for skill in generated_skills):
+        return False
+    approval_sensitive_permissions = {
+        "code_execution",
+        "network",
+        "system.exec",
+        "dependency.install",
+        "filesystem.delete",
+    }
+    for value in _permission_values(case):
+        permission = value.split(":", 1)[0]
+        if permission in approval_sensitive_permissions:
+            return True
+    return False
+
+
+def _has_skill_promotion_coverage_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+    used_or_lifecycle_skills = set(_string_values(case.get("used_skills")))
+    used_or_lifecycle_skills.update(
+        _learning_values(case, "skill_lifecycle_records", "skill_name")
+    )
+    for lineage in learning.get("skill_lineages", []):
+        if not isinstance(lineage, dict):
+            continue
+        skill_name = str(lineage.get("skill_name") or "")
+        if not fnmatch.fnmatchcase(skill_name, "generated.habit.*"):
+            continue
+        if skill_name not in used_or_lifecycle_skills:
+            continue
+        if str(lineage.get("generation_type") or ""):
+            return True
+        if _string_values(lineage.get("source_targets")):
+            return True
+    return False
+
+
+def _has_learning_governance_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+    records = learning.get("procedure_memory_records")
+    if not isinstance(records, list):
+        records = []
+    governance_review_statuses = {
+        "edited",
+        "edited_requires_review",
+        "decayed_requires_review",
+        "needs_changes",
+        "rejected",
+        "approved",
+    }
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("status") or "") in {"disabled", "deprecated"}:
+            return True
+        if int(record.get("review_count") or 0) > 0:
+            return True
+        if int(record.get("audit_event_count") or 0) > 0:
+            return True
+        if str(record.get("review_status") or "") in governance_review_statuses:
+            return True
+    skill_records = learning.get("skill_lifecycle_records")
+    if not isinstance(skill_records, list):
+        return False
+    for record in skill_records:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("lifecycle_status") or "") == "deprecated":
+            return True
+        if "deprecate" in _string_values(record.get("registration_actions")):
+            return True
+        if "deprecated" in _string_values(record.get("registration_statuses")):
+            return True
+    return False
+
+
+def _has_learning_history_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+
+    experience_records = learning.get("experience_records")
+    if isinstance(experience_records, list):
+        for record in experience_records:
+            if isinstance(record, dict) and (
+                record.get("experience_id") or record.get("task_id") or record.get("status")
+            ):
+                return True
+
+    records = learning.get("procedure_memory_records")
+    if isinstance(records, list):
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            if int(record.get("audit_event_count") or 0) > 0:
+                return True
+            if int(record.get("review_count") or 0) > 0:
+                return True
+            if _string_values(record.get("audit_events")):
+                return True
+            if _string_values(record.get("review_decisions")):
+                return True
+            if record.get("latest_audit_event") or record.get("latest_review_decision"):
+                return True
+
+    skill_records = learning.get("skill_lifecycle_records")
+    if isinstance(skill_records, list):
+        for record in skill_records:
+            if not isinstance(record, dict):
+                continue
+            if _string_values(record.get("registration_actions")):
+                return True
+            if _string_values(record.get("registration_statuses")):
+                return True
+            if _string_values(record.get("approval_statuses")):
+                return True
+            if bool(record.get("validation_passed")):
+                return True
+            if record.get("lifecycle_status") or record.get("draft_status"):
+                return True
+    return False
+
+
+def _has_learning_edit_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+    records = learning.get("procedure_memory_records")
+    if not isinstance(records, list):
+        return False
+    edit_review_statuses = {
+        "edited",
+        "edited_requires_review",
+    }
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("review_status") or "") in edit_review_statuses:
+            return True
+        if str(record.get("latest_audit_event") or "") == "edited":
+            return True
+        if "edited" in _string_values(record.get("audit_events")):
+            return True
+    return False
+
+
+def _has_learning_request_changes_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+    records = learning.get("procedure_memory_records")
+    if not isinstance(records, list):
+        return False
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("review_status") or "") == "needs_changes":
+            return True
+        if str(record.get("latest_review_decision") or "") == "needs_changes":
+            return True
+        if "needs_changes" in _string_values(record.get("review_decisions")):
+            return True
+    return False
+
+
+def _has_learning_decay_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+    records = learning.get("procedure_memory_records")
+    if not isinstance(records, list):
+        return False
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("review_status") or "") == "decayed_requires_review":
+            return True
+        if str(record.get("latest_audit_event") or "") == "decayed":
+            return True
+        if "decayed" in _string_values(record.get("audit_events")):
+            return True
+    return False
+
+
+def _has_learning_disable_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+    records = learning.get("procedure_memory_records")
+    if not isinstance(records, list):
+        records = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("latest_audit_event") or "") == "disabled":
+            return True
+        review_status = str(record.get("review_status") or "")
+        if (
+            str(record.get("status") or "") in {"disabled", "deprecated"}
+            and record.get("previous_status")
+            and review_status != "rejected"
+        ):
+            return True
+
+    skill_records = learning.get("skill_lifecycle_records")
+    if not isinstance(skill_records, list):
+        return False
+    for record in skill_records:
+        if not isinstance(record, dict):
+            continue
+        lifecycle_status = str(record.get("lifecycle_status") or "")
+        if lifecycle_status == "deprecated":
+            return True
+        if lifecycle_status == "active":
+            continue
+        if "deprecate" in _string_values(record.get("registration_actions")):
+            return True
+        if "deprecated" in _string_values(record.get("registration_statuses")):
+            return True
+    return False
+
+
+def _has_learning_restore_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+    records = learning.get("procedure_memory_records")
+    if not isinstance(records, list):
+        records = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        audit_events = _string_values(record.get("audit_events"))
+        if "enabled" in audit_events:
+            return True
+        if str(record.get("latest_audit_event") or "") == "enabled":
+            return True
+        if record.get("restored_status"):
+            return True
+    skill_records = learning.get("skill_lifecycle_records")
+    if not isinstance(skill_records, list):
+        return False
+    for record in skill_records:
+        if not isinstance(record, dict):
+            continue
+        actions = _string_values(record.get("registration_actions"))
+        if str(record.get("lifecycle_status") or "") == "active" and any(
+            action in {"activate", "upgrade"} for action in actions
+        ):
+            if "deprecate" in actions and record.get("latest_registration_note"):
+                return True
+    return False
+
+
+def _has_learning_rollback_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+    skill_records = learning.get("skill_lifecycle_records")
+    if not isinstance(skill_records, list):
+        return False
+    for record in skill_records:
+        if not isinstance(record, dict):
+            continue
+        if "rollback" in _string_values(record.get("registration_actions")):
+            return True
+    return False
+
+
+def _has_learning_approval_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+    records = learning.get("procedure_memory_records")
+    if not isinstance(records, list):
+        records = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("review_status") or "") == "approved":
+            return True
+        if str(record.get("latest_review_decision") or "") == "approved":
+            return True
+        if "approved" in _string_values(record.get("review_decisions")):
+            return True
+
+    skill_records = learning.get("skill_lifecycle_records")
+    if not isinstance(skill_records, list):
+        return False
+    for record in skill_records:
+        if not isinstance(record, dict):
+            continue
+        if "approved" in _string_values(record.get("approval_statuses")):
+            return True
+    return False
+
+
+def _has_learning_promotion_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+
+    records = learning.get("procedure_memory_records")
+    if isinstance(records, list):
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            audit_events = _string_values(record.get("audit_events"))
+            if "promoted_to_habit" in audit_events:
+                return True
+            if str(record.get("latest_audit_event") or "") == "promoted_to_habit":
+                return True
+
+    skill_records = learning.get("skill_lifecycle_records")
+    if not isinstance(skill_records, list):
+        skill_records = []
+    skill_lineages = [
+        record for record in learning.get("skill_lineages", []) if isinstance(record, dict)
+    ]
+    lineage_skill_names = {
+        str(record.get("skill_name"))
+        for record in skill_lineages
+        if record.get("skill_name") is not None
+    }
+    for record in skill_records:
+        if not isinstance(record, dict):
+            continue
+        skill_name = str(record.get("skill_name") or "")
+        source = str(record.get("source") or "")
+        if source in {"habit_promotion", "habit_promoted"}:
+            return True
+        if skill_name in lineage_skill_names and (
+            bool(_string_values(record.get("registration_actions")))
+            or bool(_string_values(record.get("registration_statuses")))
+            or bool(_string_values(record.get("approval_statuses")))
+            or bool(record.get("validation_passed"))
+            or str(record.get("lifecycle_status") or record.get("draft_status") or "")
+            in {"active", "validated", "approved"}
+        ):
+            return True
+    return False
+
+
+def _has_learning_validation_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+
+    procedure_records = learning.get("procedure_memory_records")
+    if isinstance(procedure_records, list):
+        for record in procedure_records:
+            if not isinstance(record, dict):
+                continue
+            if str(record.get("review_status") or "") == "approved":
+                return True
+            if str(record.get("latest_review_decision") or "") == "approved":
+                return True
+            if "approved" in _string_values(record.get("review_decisions")):
+                return True
+
+    skill_records = learning.get("skill_lifecycle_records")
+    if not isinstance(skill_records, list):
+        return False
+    for record in skill_records:
+        if not isinstance(record, dict):
+            continue
+        validation_results = record.get("validation_passed")
+        if isinstance(validation_results, list) and validation_results:
+            return True
+        if record.get("last_validated_at"):
+            return True
+    return False
+
+
+def _has_learning_rejection_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+    records = learning.get("procedure_memory_records")
+    if not isinstance(records, list):
+        records = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("review_status") or "") == "rejected":
+            return True
+        if str(record.get("latest_review_decision") or "") == "rejected":
+            return True
+        if "rejected" in _string_values(record.get("review_decisions")):
+            return True
+
+    skill_records = learning.get("skill_lifecycle_records")
+    if not isinstance(skill_records, list):
+        return False
+    for record in skill_records:
+        if not isinstance(record, dict):
+            continue
+        if "rejected" in _string_values(record.get("approval_statuses")):
+            return True
+    return False
+
+
+def _has_learning_audit_gap_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+
+    procedure_records = [
+        record
+        for record in learning.get("procedure_memory_records", [])
+        if isinstance(record, dict)
+    ]
+    if (
+        _learning_values(case, "procedure_matches", "procedure_id")
+        or _learning_values(case, "habit_fast_paths", "habit_id")
+    ) and not procedure_records:
+        return True
+
+    for record in procedure_records:
+        status = str(record.get("status") or "")
+        has_review_or_audit = (
+            int(record.get("review_count") or 0) > 0
+            or int(record.get("audit_event_count") or 0) > 0
+            or bool(_string_values(record.get("review_decisions")))
+            or bool(record.get("latest_review_decision"))
+            or bool(record.get("latest_audit_event"))
+        )
+        if status in {"verified", "habit", "disabled"} and not has_review_or_audit:
+            return True
+
+    skill_lineages = [
+        record for record in learning.get("skill_lineages", []) if isinstance(record, dict)
+    ]
+    skill_records = [
+        record for record in learning.get("skill_lifecycle_records", []) if isinstance(record, dict)
+    ]
+    if skill_lineages and not skill_records:
+        return True
+
+    lifecycle_names = {
+        str(record.get("skill_name"))
+        for record in skill_records
+        if record.get("skill_name") is not None
+    }
+    for lineage in skill_lineages:
+        skill_name = lineage.get("skill_name")
+        if skill_name is not None and str(skill_name) not in lifecycle_names:
+            return True
+
+    for record in skill_records:
+        lifecycle_status = str(record.get("lifecycle_status") or record.get("draft_status") or "")
+        has_lifecycle_evidence = (
+            bool(_string_values(record.get("registration_actions")))
+            or bool(_string_values(record.get("registration_statuses")))
+            or bool(_string_values(record.get("approval_statuses")))
+            or bool(record.get("validation_passed"))
+        )
+        if lifecycle_status in {"active", "validated", "deprecated"} and not has_lifecycle_evidence:
+            return True
+    return False
+
+
+def build_evidence_dashboard(
+    payload: dict[str, Any],
+    *,
+    limit: int = 10,
+) -> dict[str, Any]:
+    all_cases = query_evidence_index(payload, limit=0)
+    failure_layers = dict(all_cases.get("summary", {}).get("by_failure_layer", {}))
+    repair_entrypoints = [
+        {
+            "failure_layer": layer,
+            "case_count": count,
+            "query_command": _dashboard_query_command("evidence-failure-layer", layer),
+            "hint": _failure_layer_repair_hint(layer),
+        }
+        for layer, count in failure_layers.items()
+        if str(layer or "").lower() not in {"none", ""}
+    ]
+    repair_entrypoints.sort(key=lambda item: (-int(item["case_count"]), item["failure_layer"]))
+    views = {
+        "eval_coverage_cases": {
+            "title": "Eval Coverage Cases",
+            "description": "集中查看 eval case 的 status、category、requires 和 skip reason，确认新增学习闭环能力进入真实回归矩阵。",
+            "query_command": _dashboard_query_command("evidence-status", '"*"'),
+            "query": query_evidence_index(payload, statuses=["*"], limit=limit),
+        },
+        "skipped_eval_cases": {
+            "title": "Skipped Eval Cases",
+            "description": "集中查看被 requires gate 跳过的 case，确认 network / L4 / complex 场景的跳过原因可被直接复核。",
+            "query_command": _dashboard_query_command("evidence-status", "skipped"),
+            "query": query_evidence_index(payload, statuses=["skipped"], limit=limit),
+        },
+        "failed_cases": {
+            "title": "Failed Cases",
+            "description": "所有未通过 case 的首选修复入口。",
+            "query_command": _dashboard_query_command("evidence-status", "failed"),
+            "query": query_evidence_index(payload, statuses=["failed"], limit=limit),
+        },
+        "skill_or_tool_failures": {
+            "title": "Skill Or Tool Failures",
+            "description": "优先检查 skill contract、executor 输入输出和 node artifacts。",
+            "query_command": _dashboard_query_command(
+                "evidence-failure-layer",
+                "skill_or_tool",
+            ),
+            "query": query_evidence_index(
+                payload,
+                failure_layers=["skill_or_tool"],
+                limit=limit,
+            ),
+        },
+        "node_execution_cases": {
+            "title": "Node Execution Cases",
+            "description": "集中查看 TaskGraph node status、skill/action、attempts 和 error 信号，定位执行节点层面的失败或重试路径。",
+            "query_command": _dashboard_query_command("evidence-node-status", "recorded"),
+            "query": query_evidence_index(
+                payload,
+                node_statuses=["recorded"],
+                limit=limit,
+            ),
+        },
+        "critic_action_cases": {
+            "title": "Critic Action Cases",
+            "description": "集中查看 Critic verdict action、target 和 summary evidence，定位 accept / retry / replan / degrade 等执行评估路径。",
+            "query_command": _dashboard_query_command("evidence-critic-action", "recorded"),
+            "query": query_evidence_index(
+                payload,
+                critic_actions=["recorded"],
+                limit=limit,
+            ),
+        },
+        "model_capability_cases": {
+            "title": "Model Capability Cases",
+            "description": "集中查看模型能力边界或疑似模型能力不足的 case，避免误修成 Agent 流程补丁。",
+            "query_command": _dashboard_query_command(
+                "evidence-failure-layer",
+                "model_capability",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={"model_capability": ["failure_layer", "suspected"]},
+                predicate=_has_model_capability_evidence,
+                limit=limit,
+            ),
+        },
+        "completion_evaluation_cases": {
+            "title": "Completion Evaluation Cases",
+            "description": "集中查看 completion evaluator 产出的失败归因，确认任务完成度判断和主 failure layer 能被回归看板直接定位。",
+            "query_command": _dashboard_query_command(
+                "evidence-completion-layer",
+                "recorded",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "completion_evaluation": [
+                        "completion_failure_layers",
+                        "completion_evaluation.failure_layer",
+                    ]
+                },
+                predicate=_has_completion_evaluation_evidence,
+                limit=limit,
+            ),
+        },
+        "memory_retrieval_cases": {
+            "title": "Memory Retrieval Cases",
+            "description": "集中查看 vector recall、embedding provider/model、fallback、error 和兼容性证据，确认记忆召回问题能被回归看板直接定位。",
+            "query_command": _dashboard_query_command(
+                "evidence-memory-retrieval",
+                "recorded",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "memory_retrieval": [
+                        "embedding_summary",
+                        "vector_matches",
+                        "vector_memory_entries",
+                    ]
+                },
+                predicate=_has_memory_retrieval_evidence,
+                limit=limit,
+            ),
+        },
+        "llm_usage_cases": {
+            "title": "LLM Usage Cases",
+            "description": "集中查看真实触发 LLM 的 case、token 桶和耗时桶，确认 runtime 成本信号进入回归消费入口。",
+            "query_command": _dashboard_query_command(
+                "evidence-llm-usage",
+                "llm_called",
+            ),
+            "query": query_evidence_index(
+                payload,
+                llm_usage_signals=["llm_called"],
+                limit=limit,
+            ),
+        },
+        "llm_cost_hotspot_cases": {
+            "title": "Runtime Cost Hotspot Cases",
+            "description": "集中查看高 token 或长耗时 case，优先定位 runtime 成本热点和可优化回归样本。",
+            "query_command": _dashboard_query_command(
+                "evidence-llm-usage",
+                "tokens:10000+,duration:60s+",
+            ),
+            "query": query_evidence_index(
+                payload,
+                llm_usage_signals=["tokens:10000+", "duration:60s+"],
+                limit=limit,
+            ),
+        },
+        "execution_policy_cases": {
+            "title": "Execution Policy Cases",
+            "description": "集中查看 ExecutionPolicy 决策证据，确认 direct_execute、plan_required 等路径进入回归消费入口。",
+            "query_command": _dashboard_query_command(
+                "evidence-policy-decision",
+                "direct_execute",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={"policy_decision": ["direct_execute", "plan_required"]},
+                predicate=_has_policy_decision_evidence,
+                limit=limit,
+            ),
+        },
+        "planner_skipped_cases": {
+            "title": "Planner Skipped Cases",
+            "description": "集中查看明确跳过 Planner 的 case，确认 fast path 不只是 policy decision，而是实际记录了 skipped_stages。",
+            "query_command": _dashboard_query_command(
+                "evidence-skipped-stage",
+                "planner",
+            ),
+            "query": query_evidence_index(
+                payload,
+                skipped_stages=["planner"],
+                limit=limit,
+            ),
+        },
+        "policy_risk_flag_cases": {
+            "title": "Policy Risk Flag Cases",
+            "description": "集中查看 ExecutionPolicy 风险/路由标记，解释 fast path 为什么被允许、为什么回退 Planner 或为什么需要人工治理。",
+            "query_command": _dashboard_query_command(
+                "evidence-policy-risk-flag",
+                '"*"',
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={"policy_risk_flag": ["*"]},
+                predicate=_has_policy_risk_flag_evidence,
+                limit=limit,
+            ),
+        },
+        "policy_reason_cases": {
+            "title": "Policy Reason Cases",
+            "description": "集中查看 ExecutionPolicy reason 文本，直接定位 direct_execute 或 plan_required 的触发/回退解释。",
+            "query_command": _dashboard_query_command(
+                "evidence-policy-reason",
+                '"*"',
+            ),
+            "query": query_evidence_index(
+                payload,
+                policy_reasons=["*"],
+                limit=limit,
+            ),
+        },
+        "policy_context_budget_cases": {
+            "title": "Policy Context Budget Cases",
+            "description": "集中查看 ExecutionPolicy context_budget 信号，定位 skill registry、召回、agent state 和 fast path bootstrap 字段大小。",
+            "query_command": _dashboard_query_command(
+                "evidence-policy-context-budget",
+                "recorded",
+            ),
+            "query": query_evidence_index(
+                payload,
+                policy_context_budgets=["recorded"],
+                limit=limit,
+            ),
+        },
+        "request_payload_stats_cases": {
+            "title": "Request Payload Stats Cases",
+            "description": "集中查看 LLM request_payload_stats 信号，定位 Planner / Critic / Completion 请求字段大小和上下文膨胀热点。",
+            "query_command": _dashboard_query_command(
+                "evidence-request-payload-stats",
+                "recorded",
+            ),
+            "query": query_evidence_index(
+                payload,
+                request_payload_stats=["recorded"],
+                limit=limit,
+            ),
+        },
+        "permission_governance_cases": {
+            "title": "Permission Governance Cases",
+            "description": "集中查看 permission grant / deny 与权限失败 case，确认学习结果没有绕过治理门禁。",
+            "query_command": _dashboard_query_command("evidence-permission", '"*"'),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={"permission_governance": ["permission_summary", "permission_failure"]},
+                predicate=_has_permission_governance_evidence,
+                limit=limit,
+            ),
+        },
+        "habit_fast_path_cases": {
+            "title": "Habit Fast Path Cases",
+            "description": "跟踪 habit fast path 在回归中的真实命中、回退和 validator evidence。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "habit_fast_paths",
+            ),
+            "query": query_evidence_index(
+                payload,
+                learning_kinds=["habit_fast_paths"],
+                limit=limit,
+            ),
+        },
+        "learning_match_explanation_cases": {
+            "title": "Learning Match Explanation Cases",
+            "description": "集中查看 procedure / habit retrieval 的匹配解释，确认 matched item、rejected candidates、confirmation requirement 和 suggestion mode 进入回归消费入口。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "procedure_matches",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "learning_match_explanation": [
+                        "procedure_matches",
+                        "matched_item",
+                        "rejected_candidates",
+                        "required_confirmation",
+                        "suggestion_mode",
+                    ]
+                },
+                predicate=_has_learning_match_explanation_evidence,
+                limit=limit,
+            ),
+        },
+        "learning_gate_cases": {
+            "title": "Learning Gate Cases",
+            "description": "集中查看带 experience record 的 case，确认学习入口绑定 validation evidence。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "experience_records",
+            ),
+            "query": query_evidence_index(
+                payload,
+                learning_kinds=["experience_records"],
+                limit=limit,
+            ),
+        },
+        "learning_governance_cases": {
+            "title": "Learning Governance Cases",
+            "description": "集中查看 procedure / habit / skill 生命周期、review、disable、enable、deprecate 和 reactivate evidence，确认用户可治理的学习对象进入回归视图。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "procedure_memory_records,skill_lifecycle_records",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "learning_governance": [
+                        "procedure_memory_records",
+                        "skill_lifecycle_records",
+                    ]
+                },
+                predicate=_has_learning_governance_evidence,
+                limit=limit,
+            ),
+        },
+        "learning_history_cases": {
+            "title": "Learning History Cases",
+            "description": "集中查看可被 learning history 展开的对象级事件流，确认 experience、procedure / habit 和 skill lifecycle 历史进入回归消费入口。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "experience_records,procedure_memory_records,skill_lifecycle_records",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "learning_history": [
+                        "experience_records.recorded_or_validated",
+                        "procedure_memory_records.audit_or_review",
+                        "skill_lifecycle_records.lifecycle_events",
+                    ]
+                },
+                predicate=_has_learning_history_evidence,
+                limit=limit,
+            ),
+        },
+        "learning_approval_cases": {
+            "title": "Learning Approval Cases",
+            "description": "集中查看 learning approve / approved review evidence，确认用户审批的学习对象进入回归视图且没有绕过后续 activation gate。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "procedure_memory_records,skill_lifecycle_records",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "learning_approval": [
+                        "procedure_memory_records.approved",
+                        "skill_lifecycle_records.approved",
+                    ]
+                },
+                predicate=_has_learning_approval_evidence,
+                limit=limit,
+            ),
+        },
+        "learning_promotion_cases": {
+            "title": "Learning Promotion Cases",
+            "description": "集中查看 procedure -> habit 和 habit -> skill promotion evidence，确认学习升级建立在 review、validation、lineage 和 lifecycle 证据链之上。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "procedure_memory_records,skill_lineages,skill_lifecycle_records",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "learning_promotion": [
+                        "procedure_memory_records.promoted_to_habit",
+                        "skill_lineages",
+                        "skill_lifecycle_records.habit_promotion",
+                    ]
+                },
+                predicate=_has_learning_promotion_evidence,
+                limit=limit,
+            ),
+        },
+        "learning_validation_cases": {
+            "title": "Learning Validation Cases",
+            "description": "集中查看 procedure / habit approved review evidence 和 skill validation evidence，确认学习对象校验记录能被回归看板直接定位。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-validation",
+                '"*"',
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "learning_validation": [
+                        "procedure_memory_records.review_status.approved",
+                        "procedure_memory_records.review_decision.approved",
+                        "skill_lifecycle_records.validation_passed",
+                        "skill_lifecycle_records.last_validated_at",
+                    ]
+                },
+                predicate=_has_learning_validation_evidence,
+                limit=limit,
+            ),
+        },
+        "learning_edit_cases": {
+            "title": "Learning Edit Cases",
+            "description": "集中查看 procedure edit evidence，确认用户修正过的学习对象进入回归视图且需要复审时不会继续自动复用。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-audit-event",
+                "edited",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "learning_edit": [
+                        "procedure_memory_records.edited",
+                    ]
+                },
+                predicate=_has_learning_edit_evidence,
+                limit=limit,
+            ),
+        },
+        "learning_request_changes_cases": {
+            "title": "Learning Request Changes Cases",
+            "description": "集中查看 learning request-changes / needs_changes review evidence，确认要求修改的 procedure / habit 会退出自动复用并进入复审队列。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-review-decision",
+                "needs_changes",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "learning_request_changes": [
+                        "procedure_memory_records.needs_changes",
+                    ]
+                },
+                predicate=_has_learning_request_changes_evidence,
+                limit=limit,
+            ),
+        },
+        "learning_decay_cases": {
+            "title": "Learning Decay Cases",
+            "description": "集中查看 learning decay evidence，确认过期 procedure / habit 被审计地降级、需要复审且不会继续自动 fast path。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-audit-event",
+                "decayed",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "learning_decay": [
+                        "procedure_memory_records.decayed",
+                        "procedure_memory_records.decayed_requires_review",
+                    ]
+                },
+                predicate=_has_learning_decay_evidence,
+                limit=limit,
+            ),
+        },
+        "learning_disable_cases": {
+            "title": "Learning Disable Cases",
+            "description": "集中查看 learning disable / deprecate evidence，确认被用户停用的学习对象进入回归视图且不会继续作为可复用能力。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "procedure_memory_records,skill_lifecycle_records",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "learning_disable": [
+                        "procedure_memory_records.disabled",
+                        "skill_lifecycle_records.deprecated",
+                    ]
+                },
+                predicate=_has_learning_disable_evidence,
+                limit=limit,
+            ),
+        },
+        "learning_restore_cases": {
+            "title": "Learning Restore Cases",
+            "description": "集中查看 learning enable / restore / reactivation evidence，确认被禁用的学习对象可被审计地恢复。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "procedure_memory_records,skill_lifecycle_records",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "learning_restore": [
+                        "procedure_memory_records.enabled",
+                        "skill_lifecycle_records.activate_with_note",
+                    ]
+                },
+                predicate=_has_learning_restore_evidence,
+                limit=limit,
+            ),
+        },
+        "learning_rollback_cases": {
+            "title": "Learning Rollback Cases",
+            "description": "集中查看 skill rollback lifecycle evidence，确认学习能力版本回退进入回归视图且可追溯 previous / target version。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "skill_lifecycle_records",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={"learning_rollback": ["skill_lifecycle_records.rollback"]},
+                predicate=_has_learning_rollback_evidence,
+                limit=limit,
+            ),
+        },
+        "learning_rejection_cases": {
+            "title": "Learning Rejection Cases",
+            "description": "集中查看 learning reject / rejected approval evidence，确认用户拒绝的学习对象进入回归视图且不会被误当作可复用能力。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "procedure_memory_records,skill_lifecycle_records",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "learning_rejection": [
+                        "procedure_memory_records.rejected",
+                        "skill_lifecycle_records.rejected",
+                    ]
+                },
+                predicate=_has_learning_rejection_evidence,
+                limit=limit,
+            ),
+        },
+        "learning_audit_gap_cases": {
+            "title": "Learning Audit Gap Cases",
+            "description": "集中查看已有 procedure / habit / skill lineage 但缺少 review、audit、validation 或 lifecycle 证据的 case，优先修补学习证据链断点。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "procedure_matches,habit_fast_paths,skill_lineages,skill_lifecycle_records",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "learning_audit_gap": [
+                        "procedure_or_habit_without_memory_record",
+                        "skill_lineage_without_lifecycle_record",
+                        "lifecycle_without_validation_or_governance_evidence",
+                    ]
+                },
+                predicate=_has_learning_audit_gap_evidence,
+                limit=limit,
+            ),
+        },
+        "skill_lifecycle_governance_cases": {
+            "title": "Skill Lifecycle Governance Cases",
+            "description": "集中查看 skill registry、validation、approval 和 registration lifecycle evidence，确认 skill 治理状态进入回归视图。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "skill_lifecycle_records",
+            ),
+            "query": query_evidence_index(
+                payload,
+                learning_kinds=["skill_lifecycle_records"],
+                limit=limit,
+            ),
+        },
+        "generated_habit_skill_usage": {
+            "title": "Generated Habit Skill Usage",
+            "description": "观察 habit-promoted skill 的真实回归使用情况。",
+            "query_command": _dashboard_query_command("evidence-skill", "generated.habit.*"),
+            "query": query_evidence_index(
+                payload,
+                skills=["generated.habit.*"],
+                limit=limit,
+            ),
+        },
+        "skill_promotion_coverage_cases": {
+            "title": "Skill Promotion Coverage Cases",
+            "description": "集中查看 habit-promoted skill 的 generation_type 和 source target 覆盖情况，判断新增 promotion 类型或 alias 是否进入真实回归证据。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "skill_lineages,skill_lifecycle_records",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "skill_promotion_coverage": [
+                        "generated.habit.*",
+                        "skill_lineages.generation_type",
+                        "skill_lineages.source_targets",
+                    ]
+                },
+                predicate=_has_skill_promotion_coverage_evidence,
+                limit=limit,
+            ),
+        },
+        "skill_approval_gate_cases": {
+            "title": "Skill Approval Gate Cases",
+            "description": "集中查看 habit-promoted skill 中触发审批敏感权限的 case，确认高风险 promotion 没有绕过人工审批和权限治理。",
+            "query_command": (
+                "poetry run python scripts/run_real_world_evals.py "
+                "--query-evidence-index --evidence-skill generated.habit.* "
+                "--evidence-permission 'system.exec:*'"
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "skill_approval_gate": [
+                        "generated.habit.*",
+                        "approval_sensitive_permission",
+                    ]
+                },
+                predicate=_has_skill_approval_gate_evidence,
+                limit=limit,
+            ),
+        },
+        "learning_lineage_cases": {
+            "title": "Learning Lineage Cases",
+            "description": "含 procedure、habit 或 skill lineage evidence 的 case。",
+            "query_command": _dashboard_query_command("evidence-lineage-skill", "*"),
+            "query": _learning_lineage_query(payload, limit=limit),
+        },
+    }
+    regression_commands = _dashboard_regression_commands(
+        repair_entrypoints,
+        views,
+        all_cases["summary"],
+        all_cases.get("cases", []),
+    )
+    return {
+        "schema_version": EVIDENCE_DASHBOARD_SCHEMA_VERSION,
+        "source_schema_version": payload.get("schema_version"),
+        "run_root": payload.get("run_root"),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "limit": limit,
+        "summary": {
+            "source_run_count": all_cases["summary"]["source_run_count"],
+            "total_index_cases": all_cases["summary"]["total_index_cases"],
+            "by_status": all_cases["summary"]["by_status"],
+            "by_scenario": all_cases["summary"]["by_scenario"],
+            "by_category": all_cases["summary"]["by_category"],
+            "by_requires": all_cases["summary"]["by_requires"],
+            "by_skip_reason": all_cases["summary"]["by_skip_reason"],
+            "by_failure_layer": failure_layers,
+            "by_skill": all_cases["summary"]["by_skill"],
+            "by_procedure": all_cases["summary"]["by_procedure"],
+            "by_habit": all_cases["summary"]["by_habit"],
+            "by_lineage_skill": all_cases["summary"]["by_lineage_skill"],
+            "by_promotion_generation_type": all_cases["summary"][
+                "by_promotion_generation_type"
+            ],
+            "by_promotion_source_target": all_cases["summary"][
+                "by_promotion_source_target"
+            ],
+            "by_permission": all_cases["summary"]["by_permission"],
+            "by_completion_layer": all_cases["summary"]["by_completion_layer"],
+            "by_policy_decision": all_cases["summary"]["by_policy_decision"],
+            "by_skipped_stage": all_cases["summary"]["by_skipped_stage"],
+            "by_policy_risk_flag": all_cases["summary"]["by_policy_risk_flag"],
+            "by_policy_reason": all_cases["summary"]["by_policy_reason"],
+            "by_policy_context_budget": all_cases["summary"][
+                "by_policy_context_budget"
+            ],
+            "by_request_payload_stats": all_cases["summary"][
+                "by_request_payload_stats"
+            ],
+            "by_node_status": all_cases["summary"]["by_node_status"],
+            "by_critic_action": all_cases["summary"]["by_critic_action"],
+            "by_memory_retrieval": all_cases["summary"]["by_memory_retrieval"],
+            "by_llm_usage": all_cases["summary"]["by_llm_usage"],
+            "by_learning_kind": all_cases["summary"]["by_learning_kind"],
+            "by_learning_validation": all_cases["summary"]["by_learning_validation"],
+            "by_skill_validation": all_cases["summary"]["by_skill_validation"],
+            "by_learning_review_decision": all_cases["summary"][
+                "by_learning_review_decision"
+            ],
+            "by_learning_audit_event": all_cases["summary"]["by_learning_audit_event"],
+            "repair_entrypoint_count": len(repair_entrypoints),
+            "regression_command_count": len(regression_commands),
+        },
+        "repair_entrypoints": repair_entrypoints,
+        "regression_commands": regression_commands,
+        "views": views,
+    }
+
+
+def _render_dashboard_cases(query: dict[str, Any]) -> list[str]:
+    lines = [
+        "| Run | Scenario | Category | Requires | Status | Skip Reason | Failure Layer | Policy Decisions | Skipped Stages | Policy Risk Flags | Policy Reasons | Policy Context Budget | Request Payload Stats | Node Status | Critic Actions | LLM Usage | Skills | Lineage | Match | Promotion Types | Promotion Targets | Diagnostics |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for case in query.get("cases", []):
+        if not isinstance(case, dict):
+            continue
+        lineage_values = (
+            _string_values(case.get("procedure_ids"))
+            + _string_values(case.get("habit_ids"))
+            + _string_values(case.get("lineage_skill_names"))
+        )
+        diagnostics = "-"
+        if case.get("diagnostics_path"):
+            diagnostics = f"[diagnostics]({case.get('diagnostics_path')})"
+        lines.append(
+            f"| `{_markdown_cell(case.get('run_id'))}` | "
+            f"`{_markdown_cell(case.get('scenario_id'))}` | "
+            f"{_markdown_cell(case.get('category'))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('requires'))))} | "
+            f"{_markdown_cell(case.get('status'))} | "
+            f"{_markdown_cell(case.get('skip_reason'))} | "
+            f"{_markdown_cell(case.get('failure_layer'))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('policy_decisions'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('skipped_stages'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('policy_risk_flags'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('policy_reasons'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('policy_context_budget_signals'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('request_payload_stats_signals'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('node_status_signals'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('critic_action_signals'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('llm_usage_signals'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('used_skills'))))} | "
+            f"{_markdown_cell(_markdown_value_list(lineage_values))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('procedure_match_summaries'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('promotion_generation_types'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('promotion_source_targets'))))} | "
+            f"{diagnostics} |"
+        )
+    if len(lines) == 2:
+        lines.append(
+            "| - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |"
+        )
+    return lines
+
+
+def render_evidence_dashboard_markdown(payload: dict[str, Any]) -> str:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    lines = [
+        "# Eval Evidence Dashboard",
+        "",
+        f"- run_root: `{payload.get('run_root')}`",
+        f"- generated_at: `{payload.get('generated_at')}`",
+        f"- source_schema_version: `{payload.get('source_schema_version')}`",
+        f"- source_run_count: {summary.get('source_run_count', 0)}",
+        f"- total_index_cases: {summary.get('total_index_cases', 0)}",
+        f"- section_case_limit: {payload.get('limit', 0)}",
+        "",
+        "## Overview",
+        "",
+        _markdown_count_line("status", summary.get("by_status", {})),
+        _markdown_count_line("scenario", summary.get("by_scenario", {})),
+        _markdown_count_line("category", summary.get("by_category", {})),
+        _markdown_count_line("requires", summary.get("by_requires", {})),
+        _markdown_count_line("skip_reason", summary.get("by_skip_reason", {})),
+        _markdown_count_line("failure_layer", summary.get("by_failure_layer", {})),
+        _markdown_count_line("skill", summary.get("by_skill", {})),
+        _markdown_count_line("procedure", summary.get("by_procedure", {})),
+        _markdown_count_line("habit", summary.get("by_habit", {})),
+        _markdown_count_line("lineage_skill", summary.get("by_lineage_skill", {})),
+        _markdown_count_line(
+            "promotion_generation_type",
+            summary.get("by_promotion_generation_type", {}),
+        ),
+        _markdown_count_line(
+            "promotion_source_target",
+            summary.get("by_promotion_source_target", {}),
+        ),
+        _markdown_count_line("permission", summary.get("by_permission", {})),
+        _markdown_count_line("completion_layer", summary.get("by_completion_layer", {})),
+        _markdown_count_line("policy_decision", summary.get("by_policy_decision", {})),
+        _markdown_count_line("skipped_stage", summary.get("by_skipped_stage", {})),
+        _markdown_count_line(
+            "policy_risk_flag",
+            summary.get("by_policy_risk_flag", {}),
+        ),
+        _markdown_count_line("policy_reason", summary.get("by_policy_reason", {})),
+        _markdown_count_line(
+            "policy_context_budget",
+            summary.get("by_policy_context_budget", {}),
+        ),
+        _markdown_count_line(
+            "request_payload_stats",
+            summary.get("by_request_payload_stats", {}),
+        ),
+        _markdown_count_line("node_status", summary.get("by_node_status", {})),
+        _markdown_count_line("critic_action", summary.get("by_critic_action", {})),
+        _markdown_count_line("memory_retrieval", summary.get("by_memory_retrieval", {})),
+        _markdown_count_line("llm_usage", summary.get("by_llm_usage", {})),
+        _markdown_count_line("learning_kind", summary.get("by_learning_kind", {})),
+        _markdown_count_line(
+            "learning_validation",
+            summary.get("by_learning_validation", {}),
+        ),
+        _markdown_count_line("skill_validation", summary.get("by_skill_validation", {})),
+        _markdown_count_line(
+            "learning_review_decision",
+            summary.get("by_learning_review_decision", {}),
+        ),
+        _markdown_count_line(
+            "learning_audit_event",
+            summary.get("by_learning_audit_event", {}),
+        ),
+        "",
+        "## Repair Entry Points",
+        "",
+        "| Failure Layer | Cases | Query | First Inspection |",
+        "|---|---:|---|---|",
+    ]
+    for item in payload.get("repair_entrypoints", []):
+        if not isinstance(item, dict):
+            continue
+        lines.append(
+            f"| `{_markdown_cell(item.get('failure_layer'))}` | "
+            f"{_markdown_cell(item.get('case_count'))} | "
+            f"`{_markdown_cell(item.get('query_command'))}` | "
+            f"{_markdown_cell(item.get('hint'))} |"
+        )
+    if not payload.get("repair_entrypoints"):
+        lines.append("| - | 0 | - | - |")
+
+    lines.extend(
+        [
+            "",
+            "## Regression Commands",
+            "",
+            "| Kind | Scope | Cases | Command |",
+            "|---|---|---:|---|",
+        ]
+    )
+    for item in payload.get("regression_commands", []):
+        if not isinstance(item, dict):
+            continue
+        lines.append(
+            f"| `{_markdown_cell(item.get('kind'))}` | "
+            f"{_markdown_cell(item.get('label'))} | "
+            f"{_markdown_cell(item.get('matched_cases', 0))} | "
+            f"`{_markdown_cell(item.get('command'))}` |"
+        )
+    if not payload.get("regression_commands"):
+        lines.append("| - | - | 0 | - |")
+
+    views = payload.get("views") if isinstance(payload.get("views"), dict) else {}
+    for key in [
+        "eval_coverage_cases",
+        "skipped_eval_cases",
+        "failed_cases",
+        "skill_or_tool_failures",
+        "node_execution_cases",
+        "critic_action_cases",
+        "model_capability_cases",
+        "completion_evaluation_cases",
+        "memory_retrieval_cases",
+        "llm_usage_cases",
+        "llm_cost_hotspot_cases",
+        "execution_policy_cases",
+        "planner_skipped_cases",
+        "policy_risk_flag_cases",
+        "policy_reason_cases",
+        "policy_context_budget_cases",
+        "request_payload_stats_cases",
+        "permission_governance_cases",
+        "habit_fast_path_cases",
+        "learning_match_explanation_cases",
+        "learning_gate_cases",
+        "learning_governance_cases",
+        "learning_history_cases",
+        "learning_approval_cases",
+        "learning_promotion_cases",
+        "learning_validation_cases",
+        "learning_edit_cases",
+        "learning_request_changes_cases",
+        "learning_decay_cases",
+        "learning_disable_cases",
+        "learning_restore_cases",
+        "learning_rollback_cases",
+        "learning_rejection_cases",
+        "learning_audit_gap_cases",
+        "skill_lifecycle_governance_cases",
+        "generated_habit_skill_usage",
+        "skill_promotion_coverage_cases",
+        "skill_approval_gate_cases",
+        "learning_lineage_cases",
+    ]:
+        view = views.get(key)
+        if not isinstance(view, dict):
+            continue
+        query = view.get("query") if isinstance(view.get("query"), dict) else {}
+        query_summary = query.get("summary") if isinstance(query.get("summary"), dict) else {}
+        lines.extend(
+            [
+                "",
+                f"## {view.get('title')}",
+                "",
+                str(view.get("description") or ""),
+                "",
+                f"- query: `{view.get('query_command')}`",
+                f"- matched_cases: {query_summary.get('matched_cases', 0)}",
+                f"- returned_cases: {query_summary.get('returned_cases', 0)}",
+                "",
+                *_render_dashboard_cases(query),
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def render_evidence_dashboard_commands(payload: dict[str, Any]) -> str:
+    lines = [
+        "# Eval evidence dashboard regression commands",
+        f"# run_root: {payload.get('run_root')}",
+        f"# generated_at: {payload.get('generated_at')}",
+        "",
+    ]
+    for item in payload.get("regression_commands", []):
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or item.get("kind") or "command")
+        matched_cases = int(item.get("matched_cases") or 0)
+        command = str(item.get("command") or "").strip()
+        if not command:
+            continue
+        lines.append(f"# {label} ({matched_cases} cases)")
+        lines.append(command)
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _write_evidence_index_markdown(path: Path, payload: dict[str, Any]) -> None:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    lines = [
+        "# Eval Evidence Index",
+        "",
+        f"- run_root: `{payload.get('run_root')}`",
+        f"- generated_at: `{payload.get('generated_at')}`",
+        f"- runs: {payload.get('run_count', 0)}",
+        f"- cases: {payload.get('case_count', 0)}",
+        f"- passed: {payload.get('passed', 0)}",
+        f"- failed: {payload.get('failed', 0)}",
+        f"- skipped: {payload.get('skipped', 0)}",
+        "",
+        "## Summary",
+        "",
+        _markdown_count_line("status", summary.get("by_status", {})),
+        _markdown_count_line("scenario", summary.get("by_scenario", {})),
+        _markdown_count_line("category", summary.get("by_category", {})),
+        _markdown_count_line("requires", summary.get("by_requires", {})),
+        _markdown_count_line("skip_reason", summary.get("by_skip_reason", {})),
+        _markdown_count_line("failure_layer", summary.get("by_failure_layer", {})),
+        "",
+        "## Cases",
+        "",
+        "| Run | Scenario | Category | Requires | Status | Skip Reason | Failure Layer | Skills | Learning Evidence | Diagnostics |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for case in payload.get("cases", []):
+        artifacts = case.get("artifacts") if isinstance(case.get("artifacts"), list) else []
+        diagnostics = next(
+            (
+                item
+                for item in artifacts
+                if isinstance(item, dict) and item.get("kind") == "diagnostics"
+            ),
+            None,
+        )
+        diagnostics_link = "-"
+        if isinstance(diagnostics, dict) and diagnostics.get("exists"):
+            diagnostics_link = f"[diagnostics]({diagnostics.get('path')})"
+        skills = ", ".join(f"`{item}`" for item in case.get("used_skills", [])) or "-"
+        requires = ", ".join(f"`{item}`" for item in _requires_values(case)) or "-"
+        lines.append(
+            f"| `{case.get('run_id')}` | `{case.get('scenario_id')}` | "
+            f"{case.get('category')} | {requires} | {case.get('status')} | "
+            f"{case.get('skip_reason') or '-'} | {case.get('failure_layer')} | {skills} | "
+            f"{_learning_evidence_count(case)} | {diagnostics_link} |"
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _print_scenarios(scenarios: list[dict[str, Any]]) -> None:
     for scenario in scenarios:
         requires = ",".join(str(item) for item in scenario.get("requires", [])) or "-"
@@ -2020,12 +6187,441 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-all", action="store_true", help="Include every scenario")
     parser.add_argument("--list", action="store_true", help="List scenarios and exit")
     parser.add_argument("--check-only", action="store_true", help="Validate scenario file and exit")
+    parser.add_argument(
+        "--build-evidence-index",
+        action="store_true",
+        help="Build a cross-run evidence index from existing eval_runs outputs and exit",
+    )
+    parser.add_argument(
+        "--evidence-index-output",
+        help="Output JSON path for --build-evidence-index (default: <run-root>/evidence_index.json)",
+    )
+    parser.add_argument(
+        "--query-evidence-index",
+        action="store_true",
+        help="Query an existing cross-run evidence index and exit",
+    )
+    parser.add_argument(
+        "--evidence-index-input",
+        help=(
+            "Input JSON path for --query-evidence-index or --evidence-dashboard "
+            "(default: <run-root>/evidence_index.json)"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-status",
+        action="append",
+        help="Filter evidence query by case status; can be repeated or comma-separated",
+    )
+    parser.add_argument(
+        "--evidence-failure-layer",
+        action="append",
+        help="Filter evidence query by failure layer; supports exact or glob matches",
+    )
+    parser.add_argument(
+        "--evidence-skill",
+        action="append",
+        help="Filter evidence query by used skill; supports exact or glob matches",
+    )
+    parser.add_argument(
+        "--evidence-procedure",
+        action="append",
+        help="Filter evidence query by procedure id from matches or skill lineage",
+    )
+    parser.add_argument(
+        "--evidence-habit",
+        action="append",
+        help="Filter evidence query by habit id from fast paths or skill lineage",
+    )
+    parser.add_argument(
+        "--evidence-lineage-skill",
+        action="append",
+        help="Filter evidence query by skill name recorded in lineage artifacts",
+    )
+    parser.add_argument(
+        "--evidence-promotion-generation-type",
+        action="append",
+        help=(
+            "Filter evidence query by skill lineage generation type "
+            "(for example file, json, csv, sqlite, archive, or process); "
+            "supports exact or glob matches"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-promotion-source-target",
+        action="append",
+        help=(
+            "Filter evidence query by habit source target recorded in skill lineage "
+            "(for example builtin.file.basic, csv, or tsv); supports exact or glob matches"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-scenario",
+        action="append",
+        help="Filter evidence query by scenario id; supports exact or glob matches",
+    )
+    parser.add_argument(
+        "--evidence-category",
+        action="append",
+        help="Filter evidence query by scenario category; supports exact or glob matches",
+    )
+    parser.add_argument(
+        "--evidence-requires",
+        action="append",
+        help="Filter evidence query by scenario requires tag; supports exact or glob matches",
+    )
+    parser.add_argument(
+        "--evidence-skip-reason",
+        action="append",
+        help="Filter evidence query by skip reason; supports exact or glob matches",
+    )
+    parser.add_argument(
+        "--evidence-permission",
+        action="append",
+        help=(
+            "Filter evidence query by permission summary entry "
+            "(for example filesystem.write:granted); supports exact or glob matches"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-completion-layer",
+        action="append",
+        help=(
+            "Filter evidence query by completion evaluation failure layer; "
+            "use recorded for any non-none completion failure layer"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-policy-decision",
+        action="append",
+        help=(
+            "Filter evidence query by ExecutionPolicy decision "
+            "(for example direct_execute or plan_required); supports exact or glob matches"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-skipped-stage",
+        action="append",
+        help=(
+            "Filter evidence query by stages skipped by ExecutionPolicy "
+            "(for example planner); supports exact or glob matches"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-policy-risk-flag",
+        action="append",
+        help=(
+            "Filter evidence query by enabled ExecutionPolicy risk or routing flag "
+            "(for example network, ambiguous_reference, or planner_context_required); "
+            "supports exact or glob matches"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-policy-reason",
+        action="append",
+        help=(
+            "Filter evidence query by ExecutionPolicy reason text; supports exact "
+            "or glob matches, for example '*风险标记*'"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-policy-context-budget",
+        action="append",
+        help=(
+            "Filter evidence query by ExecutionPolicy context budget signal "
+            "(for example recorded or skill_registry_entries:json_chars:50000+); "
+            "supports exact or glob matches"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-request-payload-stats",
+        action="append",
+        help=(
+            "Filter evidence query by LLM request_payload_stats signal "
+            "(for example recorded, prompt:planner_v1, or "
+            "skill_registry_entries:json_chars:10000-49999); supports exact or glob matches"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-node-status",
+        action="append",
+        help=(
+            "Filter evidence query by TaskGraph node status signal "
+            "(for example recorded, status:completed, skill:builtin.file.basic, "
+            "action:write, or error:present); supports exact or glob matches"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-critic-action",
+        action="append",
+        help=(
+            "Filter evidence query by Critic verdict action signal "
+            "(for example recorded, action:accept, summary:present, or target:<id>); "
+            "supports exact or glob matches"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-memory-retrieval",
+        action="append",
+        help=(
+            "Filter evidence query by memory retrieval or embedding signal "
+            "(recorded, vector_match, vector_memory_entry, fallback, error, "
+            "incompatible, provider:<name>, model:<name>)"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-llm-usage",
+        action="append",
+        help=(
+            "Filter evidence query by LLM/runtime cost signal "
+            "(llm_called, no_llm, llm_unknown, tokens:0, tokens:1-999, "
+            "tokens:1000-9999, tokens:10000+, duration:<1s, duration:1-10s, "
+            "duration:10-60s, duration:60s+)"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-learning-kind",
+        action="append",
+        help=(
+            "Filter evidence query by learning evidence kind "
+            "(procedure_matches, habit_fast_paths, experience_records, "
+            "procedure_memory_records, skill_lineages, skill_lifecycle_records)"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-skill-validation",
+        action="append",
+        help=(
+            "Filter evidence query by skill lifecycle validation status "
+            "(passed, failed, or recorded); supports exact or glob matches"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-learning-validation",
+        action="append",
+        help=(
+            "Filter evidence query by procedure/habit approved review evidence "
+            "or skill validation evidence (procedure, habit, skill, approved, "
+            "passed, failed, recorded, or glob patterns)"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-learning-review-decision",
+        action="append",
+        help=(
+            "Filter evidence query by procedure/habit review decision "
+            "(approved, rejected, needs_changes, etc.); supports exact or glob matches"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-learning-audit-event",
+        action="append",
+        help=(
+            "Filter evidence query by procedure/habit audit event "
+            "(edited, decayed, disabled, enabled, promoted_to_habit, etc.); "
+            "supports exact or glob matches"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-limit",
+        type=int,
+        default=50,
+        help="Maximum cases to include in query output (default: 50; use 0 for all)",
+    )
+    parser.add_argument(
+        "--evidence-json",
+        action="store_true",
+        help="Emit evidence query output as JSON instead of Markdown",
+    )
+    parser.add_argument(
+        "--evidence-output",
+        help="Write evidence query output to this path instead of stdout",
+    )
+    parser.add_argument(
+        "--evidence-dashboard",
+        action="store_true",
+        help="Render a regression dashboard/runbook from an existing evidence index and exit",
+    )
+    parser.add_argument(
+        "--evidence-dashboard-output",
+        help=(
+            "Output path for --evidence-dashboard "
+            "(default: <run-root>/evidence_dashboard.md or .json)"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-dashboard-json",
+        action="store_true",
+        help="Write the evidence dashboard payload as JSON instead of Markdown",
+    )
+    parser.add_argument(
+        "--evidence-dashboard-commands-output",
+        help=(
+            "Optional output path for a plain-text command list derived from "
+            "--evidence-dashboard regression_commands"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-dashboard-limit",
+        type=int,
+        default=10,
+        help="Maximum cases per dashboard section (default: 10; use 0 for all)",
+    )
     parser.add_argument("--verbose", action="store_true")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    run_root = Path(args.run_root).resolve()
+    evidence_index_payload: dict[str, Any] | None = None
+    evidence_index_path: Path | None = None
+    if args.build_evidence_index:
+        output_json = (
+            Path(args.evidence_index_output).resolve()
+            if args.evidence_index_output
+            else run_root / "evidence_index.json"
+        )
+        evidence_index_payload = _write_evidence_index(run_root, output_json)
+        evidence_index_path = output_json
+        print(f"evidence_index: {output_json}")
+        print(f"evidence_index_markdown: {output_json.with_suffix('.md')}")
+        print(
+            f"runs={evidence_index_payload['run_count']} "
+            f"cases={evidence_index_payload['case_count']} "
+            f"passed={evidence_index_payload['passed']} "
+            f"failed={evidence_index_payload['failed']} "
+            f"skipped={evidence_index_payload['skipped']}"
+        )
+        if not args.query_evidence_index and not args.evidence_dashboard:
+            return 0
+    if args.query_evidence_index:
+        if evidence_index_payload is None:
+            evidence_index_path = (
+                Path(args.evidence_index_input).resolve()
+                if args.evidence_index_input
+                else run_root / "evidence_index.json"
+            )
+            if not evidence_index_path.exists():
+                print(
+                    f"evidence index not found: {evidence_index_path}; "
+                    "run with --build-evidence-index first",
+                    file=sys.stderr,
+                )
+                return 2
+            loaded_payload = _load_json(evidence_index_path)
+            if not isinstance(loaded_payload, dict):
+                print(
+                    f"evidence index is not a JSON object: {evidence_index_path}", file=sys.stderr
+                )
+                return 2
+            evidence_index_payload = loaded_payload
+        query_payload = query_evidence_index(
+            evidence_index_payload,
+            statuses=args.evidence_status,
+            failure_layers=args.evidence_failure_layer,
+            skills=args.evidence_skill,
+            procedure_ids=args.evidence_procedure,
+            habit_ids=args.evidence_habit,
+            lineage_skills=args.evidence_lineage_skill,
+            promotion_generation_types=args.evidence_promotion_generation_type,
+            promotion_source_targets=args.evidence_promotion_source_target,
+            scenario_ids=args.evidence_scenario,
+            categories=args.evidence_category,
+            requires=args.evidence_requires,
+            skip_reasons=args.evidence_skip_reason,
+            permissions=args.evidence_permission,
+            completion_layers=args.evidence_completion_layer,
+            policy_decisions=args.evidence_policy_decision,
+            skipped_stages=args.evidence_skipped_stage,
+            policy_risk_flags=args.evidence_policy_risk_flag,
+            policy_reasons=args.evidence_policy_reason,
+            policy_context_budgets=args.evidence_policy_context_budget,
+            request_payload_stats=args.evidence_request_payload_stats,
+            node_statuses=args.evidence_node_status,
+            critic_actions=args.evidence_critic_action,
+            memory_retrieval_signals=args.evidence_memory_retrieval,
+            llm_usage_signals=args.evidence_llm_usage,
+            learning_kinds=args.evidence_learning_kind,
+            learning_validation_statuses=args.evidence_learning_validation,
+            skill_validation_statuses=args.evidence_skill_validation,
+            learning_review_decisions=args.evidence_learning_review_decision,
+            learning_audit_events=args.evidence_learning_audit_event,
+            limit=args.evidence_limit,
+        )
+        if args.evidence_json:
+            rendered = json.dumps(query_payload, ensure_ascii=False, indent=2) + "\n"
+        else:
+            rendered = render_evidence_query_markdown(query_payload)
+        if args.evidence_output:
+            output_path = Path(args.evidence_output).resolve()
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(rendered, encoding="utf-8")
+            summary = query_payload["summary"]
+            print(f"evidence_query: {output_path}")
+            print(
+                f"matched={summary['matched_cases']} returned={summary['returned_cases']} "
+                f"source_cases={summary['total_index_cases']}"
+            )
+        else:
+            print(rendered, end="")
+        return 0
+    if args.evidence_dashboard:
+        if evidence_index_payload is None:
+            evidence_index_path = (
+                Path(args.evidence_index_input).resolve()
+                if args.evidence_index_input
+                else run_root / "evidence_index.json"
+            )
+            if not evidence_index_path.exists():
+                print(
+                    f"evidence index not found: {evidence_index_path}; "
+                    "run with --build-evidence-index first",
+                    file=sys.stderr,
+                )
+                return 2
+            loaded_payload = _load_json(evidence_index_path)
+            if not isinstance(loaded_payload, dict):
+                print(
+                    f"evidence index is not a JSON object: {evidence_index_path}", file=sys.stderr
+                )
+                return 2
+            evidence_index_payload = loaded_payload
+        dashboard_payload = build_evidence_dashboard(
+            evidence_index_payload,
+            limit=args.evidence_dashboard_limit,
+        )
+        if args.evidence_dashboard_json:
+            rendered = json.dumps(dashboard_payload, ensure_ascii=False, indent=2) + "\n"
+            default_output = run_root / "evidence_dashboard.json"
+        else:
+            rendered = render_evidence_dashboard_markdown(dashboard_payload)
+            default_output = run_root / "evidence_dashboard.md"
+        output_path = (
+            Path(args.evidence_dashboard_output).resolve()
+            if args.evidence_dashboard_output
+            else default_output
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(rendered, encoding="utf-8")
+        commands_path = None
+        if args.evidence_dashboard_commands_output:
+            commands_path = Path(args.evidence_dashboard_commands_output).resolve()
+            commands_path.parent.mkdir(parents=True, exist_ok=True)
+            commands_path.write_text(
+                render_evidence_dashboard_commands(dashboard_payload),
+                encoding="utf-8",
+            )
+        summary = dashboard_payload["summary"]
+        print(f"evidence_dashboard: {output_path}")
+        if commands_path is not None:
+            print(f"evidence_dashboard_commands: {commands_path}")
+        print(
+            f"source_cases={summary['total_index_cases']} "
+            f"repair_entrypoints={summary['repair_entrypoint_count']} "
+            f"regression_commands={summary['regression_command_count']}"
+        )
+        return 0
     scenario_path = Path(args.scenarios).resolve()
     scenarios = _normalize_scenarios(scenario_path)
     if args.list:
@@ -2036,7 +6632,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    run_dir = Path(args.run_root).resolve() / run_id
+    run_dir = run_root / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
     selected: list[dict[str, Any]] = []
     results: list[dict[str, Any]] = []
@@ -2049,7 +6645,9 @@ def main(argv: list[str] | None = None) -> int:
                         "id": scenario["id"],
                         "category": scenario.get("category", "uncategorized"),
                         "kind": scenario.get("kind", "task"),
+                        "requires": scenario.get("requires", []),
                         "status": "skipped",
+                        "skip_reason": reason,
                         "diagnosis": reason,
                         "failure_layer": "none",
                         "issues": [],

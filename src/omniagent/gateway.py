@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 import uuid
 
+from omniagent.agent_state import AgentStateStore
 from omniagent.completion_evaluator import CompletionEvaluator
 from omniagent.config import AppConfig
 from omniagent.critic import Critic
@@ -15,6 +16,7 @@ from omniagent.embeddings import build_embedding_provider
 from omniagent.errors import ErrorCode, OmniAgentError
 from omniagent.events import EventBus, EventHandler, EventRecorder
 from omniagent.execution_engine import ExecutionEngine
+from omniagent.experience import ExperienceRecordWriter
 from omniagent.executors.browser import BrowserExecutor
 from omniagent.executors.file import FileExecutor
 from omniagent.executors.llm_native import LLMNativeExecutor
@@ -22,6 +24,11 @@ from omniagent.executors.python import PythonExecutor
 from omniagent.graph_memory import GraphMemoryStore
 from omniagent.hybrid_memory import HybridMemoryRetriever
 from omniagent.interaction import InteractionRouter
+from omniagent.learning_governance import (
+    build_learning_history,
+    build_learning_match_explanation,
+    build_learning_review,
+)
 from omniagent.llm import build_llm_adapter
 from omniagent.memory import FileMemoryManager
 from omniagent.models import (
@@ -51,6 +58,7 @@ from omniagent.models import (
 )
 from omniagent.permissions import PermissionManager
 from omniagent.planner import Planner
+from omniagent.procedure_memory import ProcedureMemoryStore
 from omniagent.prompting import PromptManager
 from omniagent.response_generator import ResponseContext, ResponseGenerator
 from omniagent.runtime import EmbeddedRuntime
@@ -102,6 +110,11 @@ class RuntimeGateway:
         self.config = config
         self.workspace_root = workspace_root.resolve()
         self.workspace_manager = WorkspaceManager(self.workspace_root)
+        self.agent_state = AgentStateStore(self.workspace_root)
+        self.agent_state.ensure_defaults()
+        self.experience_writer = ExperienceRecordWriter(self.workspace_root)
+        self.procedure_memory = ProcedureMemoryStore(self.workspace_root)
+        self.procedure_memory.ensure()
         self.store = SQLiteStore(config.sqlite.path)
         self.graph_memory = GraphMemoryStore(self.store)
         self.embedding_provider = build_embedding_provider(config.embedding)
@@ -178,6 +191,9 @@ class RuntimeGateway:
             hybrid_memory=self.hybrid_memory,
             workflow_compiler=self.workflow_compiler,
             skill_lifecycle=self.skill_lifecycle,
+            agent_state=self.agent_state,
+            experience_writer=self.experience_writer,
+            procedure_memory=self.procedure_memory,
             planner=self.planner,
             critic=self.critic,
             completion_evaluator=self.completion_evaluator,
@@ -329,9 +345,7 @@ class RuntimeGateway:
             )
         elif route.input_type == UserInputType.TASK_UPDATE:
             target_task = (
-                self.store.get_task(route.target_task_id)
-                if route.target_task_id
-                else active_task
+                self.store.get_task(route.target_task_id) if route.target_task_id else active_task
             )
             task_report, checkpoint, assistant_message = self._handle_task_update(
                 thread,
@@ -342,9 +356,7 @@ class RuntimeGateway:
             )
         elif route.input_type == UserInputType.REPLAN_REQUEST:
             target_task = (
-                self.store.get_task(route.target_task_id)
-                if route.target_task_id
-                else active_task
+                self.store.get_task(route.target_task_id) if route.target_task_id else active_task
             )
             task_report, checkpoint, assistant_message = self._handle_replan_request(
                 thread,
@@ -400,6 +412,920 @@ class RuntimeGateway:
             task_report=task_report,
             checkpoint=checkpoint,
         )
+
+    def show_agent_state(self, *, section: str | None = None) -> dict[str, Any]:
+        if section:
+            return self.agent_state.load_section(section)
+        return self.agent_state.load().to_dict()
+
+    def agent_state_summary(self, *, task_goal: str | None = None) -> dict[str, Any]:
+        return self.agent_state.build_summary(task_goal=task_goal)
+
+    def update_current_goal(self, **updates: Any) -> dict[str, Any]:
+        return self.agent_state.update_current_goal(**updates)
+
+    def disable_user_preference(self, preference_id: str) -> dict[str, Any]:
+        return self.agent_state.disable_preference(preference_id)
+
+    def list_procedures(self, *, include_disabled: bool = False) -> list[dict[str, Any]]:
+        return self.procedure_memory.list(include_disabled=include_disabled)
+
+    def show_procedure(self, procedure_id: str) -> dict[str, Any]:
+        return self.procedure_memory.get(procedure_id) or {}
+
+    def disable_procedure(self, procedure_id: str, *, note: str | None = None) -> dict[str, Any]:
+        return self.procedure_memory.disable(procedure_id, note=note)
+
+    def edit_procedure(
+        self,
+        procedure_id: str,
+        *,
+        patch: dict[str, Any],
+        note: str | None = None,
+        reviewer: str = "local_user",
+    ) -> dict[str, Any]:
+        return self.procedure_memory.edit(
+            procedure_id,
+            patch=patch,
+            note=note,
+            reviewer=reviewer,
+        )
+
+    def review_procedure(
+        self,
+        procedure_id: str,
+        *,
+        decision: str,
+        reviewer: str = "local_user",
+        note: str | None = None,
+        evidence_refs: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self.procedure_memory.review(
+            procedure_id,
+            decision=decision,
+            reviewer=reviewer,
+            note=note,
+            evidence_refs=evidence_refs,
+        )
+
+    def promote_procedure_to_habit(
+        self,
+        procedure_id: str,
+        *,
+        note: str | None = None,
+        require_confirmation: bool = False,
+    ) -> dict[str, Any]:
+        return self.procedure_memory.promote_to_habit(
+            procedure_id,
+            note=note,
+            require_confirmation=require_confirmation,
+        )
+
+    def explain_procedure_match(self, task_goal: str) -> dict[str, Any]:
+        return self.procedure_memory.explain_match(
+            task_goal,
+            agent_state_summary=self.agent_state_summary(task_goal=task_goal),
+        )
+
+    def explain_learning_match(self, task_goal: str) -> dict[str, Any]:
+        match = self.explain_procedure_match(task_goal)
+        procedures = self.procedure_memory.list(include_disabled=True)
+        return build_learning_match_explanation(match=match, procedures=procedures)
+
+    def review_learning(
+        self,
+        *,
+        object_type: str = "all",
+        status: str | None = None,
+        include_disabled: bool = False,
+    ) -> dict[str, Any]:
+        self.skill_lifecycle.sync_workflow_candidates()
+        experiences = self._list_experience_records()
+        procedures = self.procedure_memory.list(include_disabled=include_disabled)
+        skill_names = {entry.skill_name for entry in self.store.list_skill_registry_entries()}
+        skill_names.update(draft.skill_name for draft in self.store.list_skill_drafts())
+        skills = [
+            payload
+            for payload in (self.skill_lifecycle.show_skill(name) for name in sorted(skill_names))
+            if payload
+        ]
+        return build_learning_review(
+            experiences=experiences,
+            procedures=procedures,
+            skills=skills,
+            object_type=object_type,
+            status=status,
+        )
+
+    def show_learning_object(
+        self,
+        *,
+        object_type: str,
+        object_id: str,
+        include_disabled: bool = False,
+    ) -> dict[str, Any]:
+        normalized_type = object_type.strip().lower()
+        if normalized_type not in {"experience", "procedure", "habit", "skill"}:
+            raise ValueError(
+                "learning show object_type must be experience, procedure, habit, or skill"
+            )
+        object_id = str(object_id).strip()
+        if not object_id:
+            return {}
+
+        raw_object: dict[str, Any] | None = None
+        experiences: list[dict[str, Any]] = []
+        procedures: list[dict[str, Any]] = []
+        skills: list[dict[str, Any]] = []
+
+        if normalized_type == "experience":
+            for record in self._list_experience_records():
+                if object_id in {
+                    str(record.get("experience_id") or ""),
+                    str(record.get("task_id") or ""),
+                }:
+                    raw_object = record
+                    experiences = [record]
+                    break
+        elif normalized_type in {"procedure", "habit"}:
+            procedure = self.procedure_memory.get(object_id)
+            if procedure is not None and (
+                include_disabled or str(procedure.get("status") or "") != "disabled"
+            ):
+                raw_object = procedure
+                procedures = [procedure]
+        else:
+            self.skill_lifecycle.sync_workflow_candidates()
+            payload = self.skill_lifecycle.show_skill(object_id)
+            if payload:
+                raw_object = payload
+                skills = [payload]
+
+        if raw_object is None:
+            return {}
+
+        review = build_learning_review(
+            experiences=experiences,
+            procedures=procedures,
+            skills=skills,
+            object_type=normalized_type,
+        )
+        item = next(
+            (
+                payload
+                for payload in review.get("items", [])
+                if str(payload.get("id") or "") == object_id
+                or (
+                    normalized_type == "experience"
+                    and str(raw_object.get("task_id") or "") == object_id
+                )
+            ),
+            None,
+        )
+        if item is None:
+            return {}
+        return {
+            "schema_version": "learning-object/v1",
+            "generated_at": review.get("generated_at"),
+            "object_type": normalized_type,
+            "id": object_id,
+            "item": item,
+            "raw_object": raw_object,
+        }
+
+    def history_learning_object(
+        self,
+        *,
+        object_type: str,
+        object_id: str,
+        include_disabled: bool = False,
+    ) -> dict[str, Any]:
+        detail = self.show_learning_object(
+            object_type=object_type,
+            object_id=object_id,
+            include_disabled=include_disabled,
+        )
+        if not detail:
+            return {}
+        item = detail.get("item") if isinstance(detail.get("item"), dict) else {}
+        raw_object = detail.get("raw_object") if isinstance(detail.get("raw_object"), dict) else {}
+        return build_learning_history(
+            object_type=str(detail.get("object_type") or object_type),
+            object_id=str(detail.get("id") or object_id),
+            raw_object=raw_object,
+            item=item,
+        )
+
+    def edit_learning_object(
+        self,
+        *,
+        object_type: str,
+        object_id: str,
+        patch: dict[str, Any],
+        note: str | None = None,
+        reviewer: str = "local_user",
+    ) -> dict[str, Any]:
+        normalized_type = object_type.strip().lower()
+        if normalized_type not in {"procedure", "habit"}:
+            raise ValueError("learning edit object_type must be procedure or habit")
+        object_id = str(object_id).strip()
+        if not object_id:
+            return {}
+
+        procedure = self.procedure_memory.get(object_id)
+        if procedure is None:
+            return {}
+        current_status = str(procedure.get("status") or "").lower()
+        if normalized_type == "habit" and current_status != "habit":
+            raise ValueError("learning edit --type habit requires a habit object")
+        if normalized_type == "procedure" and current_status == "habit":
+            raise ValueError(
+                "learning edit --type procedure does not target habits; use --type habit"
+            )
+
+        edited = self.procedure_memory.edit(
+            object_id,
+            patch=patch,
+            note=note,
+            reviewer=reviewer,
+        )
+        detail_type = "habit" if str(edited.get("status") or "").lower() == "habit" else "procedure"
+        detail = self.show_learning_object(
+            object_type=detail_type,
+            object_id=object_id,
+            include_disabled=True,
+        )
+        return {
+            "schema_version": "learning-operation/v1",
+            "generated_at": detail.get("generated_at"),
+            "operation": "edit",
+            "object_type": normalized_type,
+            "id": object_id,
+            "status": edited.get("status"),
+            "previous_status": current_status,
+            "item": detail.get("item"),
+            "raw_object": edited,
+            "audit_record": (edited.get("audit_notes") or [None])[-1],
+        }
+
+    def decay_learning_object(
+        self,
+        *,
+        object_type: str,
+        object_id: str,
+        note: str | None = None,
+        reviewer: str = "local_user",
+    ) -> dict[str, Any]:
+        normalized_type = object_type.strip().lower()
+        if normalized_type not in {"procedure", "habit"}:
+            raise ValueError("learning decay object_type must be procedure or habit")
+        object_id = str(object_id).strip()
+        if not object_id:
+            return {}
+
+        procedure = self.procedure_memory.get(object_id)
+        if procedure is None:
+            return {}
+        current_status = str(procedure.get("status") or "").lower()
+        if normalized_type == "habit" and current_status != "habit":
+            raise ValueError("learning decay --type habit requires a habit object")
+        if normalized_type == "procedure" and current_status == "habit":
+            raise ValueError(
+                "learning decay --type procedure does not target habits; use --type habit"
+            )
+
+        decayed = self.procedure_memory.decay(
+            object_id,
+            note=note,
+            reviewer=reviewer,
+        )
+        detail = self.show_learning_object(
+            object_type="procedure",
+            object_id=object_id,
+            include_disabled=True,
+        )
+        return {
+            "schema_version": "learning-operation/v1",
+            "generated_at": detail.get("generated_at"),
+            "operation": "decay",
+            "object_type": normalized_type,
+            "id": object_id,
+            "status": decayed.get("status"),
+            "previous_status": current_status,
+            "item": detail.get("item"),
+            "raw_object": decayed,
+            "audit_record": (decayed.get("audit_notes") or [None])[-1],
+        }
+
+    def promote_learning_object(
+        self,
+        *,
+        object_type: str,
+        object_id: str,
+        note: str | None = None,
+        require_confirmation: bool = False,
+        skill_name: str | None = None,
+        version: str | None = None,
+        approver: str = "local_user",
+        rationale: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_type = object_type.strip().lower()
+        if normalized_type not in {"procedure", "habit"}:
+            raise ValueError("learning promote object_type must be procedure or habit")
+        object_id = str(object_id).strip()
+        if not object_id:
+            return {}
+
+        procedure = self.procedure_memory.get(object_id)
+        if procedure is None:
+            return {}
+        current_status = str(procedure.get("status") or "").lower()
+        if normalized_type == "procedure":
+            if current_status == "habit":
+                raise ValueError(
+                    "learning promote --type procedure does not target habits; use --type habit"
+                )
+            promoted = self.procedure_memory.promote_to_habit(
+                object_id,
+                note=note,
+                require_confirmation=require_confirmation,
+            )
+            detail = self.show_learning_object(
+                object_type="habit",
+                object_id=object_id,
+                include_disabled=True,
+            )
+            return {
+                "schema_version": "learning-operation/v1",
+                "generated_at": detail.get("generated_at"),
+                "operation": "promote",
+                "object_type": "procedure",
+                "target_type": "habit",
+                "id": object_id,
+                "target_id": object_id,
+                "status": promoted.get("status"),
+                "previous_status": current_status,
+                "item": detail.get("item"),
+                "raw_object": promoted,
+                "audit_record": (promoted.get("audit_notes") or [None])[-1],
+            }
+
+        if current_status != "habit":
+            raise ValueError("learning promote --type habit requires a habit object")
+        promotion = self.promote_habit_to_skill(
+            object_id,
+            skill_name=skill_name,
+            version=version,
+            approver=approver,
+            rationale=rationale,
+        )
+        target_id = str(promotion.get("skill_name") or skill_name or "")
+        detail = self.show_learning_object(object_type="skill", object_id=target_id)
+        return {
+            "schema_version": "learning-operation/v1",
+            "generated_at": detail.get("generated_at"),
+            "operation": "promote",
+            "object_type": "habit",
+            "target_type": "skill",
+            "id": object_id,
+            "target_id": target_id,
+            "status": (detail.get("item") or {}).get("status"),
+            "previous_status": current_status,
+            "item": detail.get("item"),
+            "raw_object": promotion,
+            "validation_report": promotion.get("validation_report"),
+            "approval_record": promotion.get("approval_record"),
+            "registration_record": promotion.get("registration_record"),
+        }
+
+    def disable_learning_object(
+        self,
+        *,
+        object_type: str,
+        object_id: str,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_type = object_type.strip().lower()
+        if normalized_type not in {"procedure", "habit", "skill"}:
+            raise ValueError("learning disable object_type must be procedure, habit, or skill")
+        object_id = str(object_id).strip()
+        if not object_id:
+            return {}
+
+        if normalized_type == "skill":
+            before = self.show_learning_object(object_type="skill", object_id=object_id)
+            if not before:
+                return {}
+            previous_status = str((before.get("item") or {}).get("status") or "")
+            deprecate = self.skill_lifecycle.deprecate_skill(object_id, note=note)
+            detail = self.show_learning_object(object_type="skill", object_id=object_id)
+            return {
+                "schema_version": "learning-operation/v1",
+                "generated_at": detail.get("generated_at"),
+                "operation": "disable",
+                "object_type": "skill",
+                "id": object_id,
+                "status": (detail.get("item") or {}).get("status"),
+                "previous_status": previous_status,
+                "item": detail.get("item"),
+                "raw_object": detail.get("raw_object"),
+                "registration_record": deprecate.get("registration_record"),
+            }
+
+        procedure = self.procedure_memory.get(object_id)
+        if procedure is None:
+            return {}
+        current_status = str(procedure.get("status") or "").lower()
+        if normalized_type == "habit" and current_status != "habit":
+            raise ValueError("learning disable --type habit requires a habit object")
+        if normalized_type == "procedure" and current_status == "habit":
+            raise ValueError(
+                "learning disable --type procedure does not target habits; use --type habit"
+            )
+
+        disabled = self.procedure_memory.disable(object_id, note=note)
+        detail = self.show_learning_object(
+            object_type=normalized_type,
+            object_id=object_id,
+            include_disabled=True,
+        )
+        return {
+            "schema_version": "learning-operation/v1",
+            "generated_at": detail.get("generated_at"),
+            "operation": "disable",
+            "object_type": normalized_type,
+            "id": object_id,
+            "status": disabled.get("status"),
+            "previous_status": current_status,
+            "item": detail.get("item"),
+            "raw_object": disabled,
+        }
+
+    def enable_learning_object(
+        self,
+        *,
+        object_type: str,
+        object_id: str,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_type = object_type.strip().lower()
+        if normalized_type not in {"procedure", "habit", "skill"}:
+            raise ValueError("learning enable object_type must be procedure, habit, or skill")
+        object_id = str(object_id).strip()
+        if not object_id:
+            return {}
+
+        if normalized_type == "skill":
+            before = self.show_learning_object(object_type="skill", object_id=object_id)
+            if not before:
+                return {}
+            previous_status = str((before.get("item") or {}).get("status") or "")
+            if previous_status != "deprecated":
+                raise ValueError("learning enable --type skill requires a deprecated skill")
+            activation = self.skill_lifecycle.activate_skill(object_id, note=note)
+            detail = self.show_learning_object(object_type="skill", object_id=object_id)
+            return {
+                "schema_version": "learning-operation/v1",
+                "generated_at": detail.get("generated_at"),
+                "operation": "enable",
+                "object_type": "skill",
+                "id": object_id,
+                "status": (detail.get("item") or {}).get("status"),
+                "previous_status": previous_status,
+                "item": detail.get("item"),
+                "raw_object": detail.get("raw_object"),
+                "registration_record": activation.get("registration_record"),
+            }
+
+        procedure = self.procedure_memory.get(object_id)
+        if procedure is None:
+            return {}
+        current_status = str(procedure.get("status") or "").lower()
+        if current_status != "disabled":
+            raise ValueError("learning enable requires a disabled procedure or habit")
+        restored_status = ""
+        for audit_note in reversed(list(procedure.get("audit_notes") or [])):
+            if isinstance(audit_note, dict) and audit_note.get("event") == "disabled":
+                restored_status = str(audit_note.get("previous_status") or "").lower()
+                break
+        if normalized_type == "habit" and restored_status != "habit":
+            raise ValueError("learning enable --type habit requires a disabled former habit")
+        if normalized_type == "procedure" and restored_status == "habit":
+            raise ValueError(
+                "learning enable --type procedure does not target habits; use --type habit"
+            )
+
+        enabled = self.procedure_memory.enable(object_id, note=note)
+        detail = self.show_learning_object(
+            object_type=normalized_type,
+            object_id=object_id,
+        )
+        return {
+            "schema_version": "learning-operation/v1",
+            "generated_at": detail.get("generated_at"),
+            "operation": "enable",
+            "object_type": normalized_type,
+            "id": object_id,
+            "status": enabled.get("status"),
+            "previous_status": current_status,
+            "item": detail.get("item"),
+            "raw_object": enabled,
+        }
+
+    def rollback_learning_object(
+        self,
+        *,
+        object_type: str,
+        object_id: str,
+        to_version: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_type = object_type.strip().lower()
+        if normalized_type != "skill":
+            raise ValueError("learning rollback object_type must be skill")
+        object_id = str(object_id).strip()
+        if not object_id:
+            return {}
+
+        before = self.show_learning_object(object_type="skill", object_id=object_id)
+        if not before:
+            return {}
+        previous_item = before.get("item") if isinstance(before.get("item"), dict) else {}
+        previous_status = str(previous_item.get("status") or "")
+        previous_version = str(previous_item.get("version") or "")
+        rollback = self.skill_lifecycle.rollback_skill(object_id, to_version=to_version)
+        detail = self.show_learning_object(object_type="skill", object_id=object_id)
+        record = rollback.get("registration_record")
+        return {
+            "schema_version": "learning-operation/v1",
+            "generated_at": detail.get("generated_at"),
+            "operation": "rollback",
+            "object_type": "skill",
+            "id": object_id,
+            "status": (detail.get("item") or {}).get("status"),
+            "previous_status": previous_status,
+            "previous_version": previous_version,
+            "target_version": rollback.get("target_version"),
+            "item": detail.get("item"),
+            "raw_object": detail.get("raw_object"),
+            "registration_record": record,
+        }
+
+    def validate_learning_object(
+        self,
+        *,
+        object_type: str,
+        object_id: str,
+        version: str | None = None,
+        reviewer: str = "local_user",
+        note: str | None = None,
+        evidence_refs: list[str] | None = None,
+    ) -> dict[str, Any]:
+        normalized_type = object_type.strip().lower()
+        if normalized_type not in {"procedure", "habit", "skill"}:
+            raise ValueError("learning validate object_type must be procedure, habit, or skill")
+        object_id = str(object_id).strip()
+        if not object_id:
+            return {}
+
+        if normalized_type == "skill":
+            before = self.show_learning_object(object_type="skill", object_id=object_id)
+            if not before:
+                return {}
+            previous_item = before.get("item") if isinstance(before.get("item"), dict) else {}
+            previous_status = str(previous_item.get("status") or "")
+            previous_version = str(previous_item.get("version") or "")
+            validation = self.skill_lifecycle.validate_skill(object_id, version=version)
+            detail = self.show_learning_object(object_type="skill", object_id=object_id)
+            report = validation.get("validation_report")
+            return {
+                "schema_version": "learning-operation/v1",
+                "generated_at": detail.get("generated_at"),
+                "operation": "validate",
+                "object_type": "skill",
+                "id": object_id,
+                "status": (detail.get("item") or {}).get("status"),
+                "previous_status": previous_status,
+                "previous_version": previous_version,
+                "target_version": getattr(report, "version", None)
+                if report is not None
+                else version,
+                "item": detail.get("item"),
+                "raw_object": detail.get("raw_object"),
+                "validation_report": report,
+                "approval_record": validation.get("approval_record"),
+                "approval_policy": validation.get("approval_policy"),
+            }
+
+        procedure = self.procedure_memory.get(object_id)
+        if procedure is None:
+            return {}
+        current_status = str(procedure.get("status") or "").lower()
+        if normalized_type == "habit" and current_status != "habit":
+            raise ValueError("learning validate --type habit requires a habit object")
+        if normalized_type == "procedure" and current_status == "habit":
+            raise ValueError(
+                "learning validate --type procedure does not target habits; use --type habit"
+            )
+        validated = self.procedure_memory.review(
+            object_id,
+            decision="approved",
+            reviewer=reviewer,
+            note=note,
+            evidence_refs=evidence_refs,
+        )
+        detail_type = (
+            "habit" if str(validated.get("status") or "").lower() == "habit" else "procedure"
+        )
+        detail = self.show_learning_object(
+            object_type=detail_type,
+            object_id=object_id,
+            include_disabled=True,
+        )
+        return {
+            "schema_version": "learning-operation/v1",
+            "generated_at": detail.get("generated_at"),
+            "operation": "validate",
+            "object_type": normalized_type,
+            "id": object_id,
+            "status": validated.get("status"),
+            "previous_status": current_status,
+            "item": detail.get("item"),
+            "raw_object": validated,
+            "review_record": (validated.get("reviews") or [None])[-1],
+        }
+
+    def approve_learning_object(
+        self,
+        *,
+        object_type: str,
+        object_id: str,
+        reviewer: str = "local_user",
+        note: str | None = None,
+        evidence_refs: list[str] | None = None,
+        version: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_type = object_type.strip().lower()
+        if normalized_type not in {"procedure", "habit", "skill"}:
+            raise ValueError("learning approve object_type must be procedure, habit, or skill")
+        object_id = str(object_id).strip()
+        if not object_id:
+            return {}
+
+        if normalized_type == "skill":
+            before = self.show_learning_object(object_type="skill", object_id=object_id)
+            if not before:
+                return {}
+            previous_status = str((before.get("item") or {}).get("status") or "")
+            approval = self.skill_lifecycle.approve_skill(
+                object_id,
+                version=version,
+                approver=reviewer,
+                approved=True,
+                rationale=note,
+            )
+            detail = self.show_learning_object(object_type="skill", object_id=object_id)
+            return {
+                "schema_version": "learning-operation/v1",
+                "generated_at": detail.get("generated_at"),
+                "operation": "approve",
+                "object_type": "skill",
+                "id": object_id,
+                "status": (detail.get("item") or {}).get("status"),
+                "previous_status": previous_status,
+                "item": detail.get("item"),
+                "raw_object": detail.get("raw_object"),
+                "approval_record": approval.get("approval_record"),
+                "approval_policy": approval.get("approval_policy"),
+            }
+
+        procedure = self.procedure_memory.get(object_id)
+        if procedure is None:
+            return {}
+        current_status = str(procedure.get("status") or "").lower()
+        if normalized_type == "habit" and current_status != "habit":
+            raise ValueError("learning approve --type habit requires a habit object")
+        if normalized_type == "procedure" and current_status == "habit":
+            raise ValueError(
+                "learning approve --type procedure does not target habits; use --type habit"
+            )
+
+        approved = self.procedure_memory.review(
+            object_id,
+            decision="approved",
+            reviewer=reviewer,
+            note=note,
+            evidence_refs=evidence_refs,
+        )
+        detail_type = (
+            "habit" if str(approved.get("status") or "").lower() == "habit" else "procedure"
+        )
+        detail = self.show_learning_object(
+            object_type=detail_type,
+            object_id=object_id,
+            include_disabled=True,
+        )
+        return {
+            "schema_version": "learning-operation/v1",
+            "generated_at": detail.get("generated_at"),
+            "operation": "approve",
+            "object_type": normalized_type,
+            "id": object_id,
+            "status": approved.get("status"),
+            "previous_status": current_status,
+            "item": detail.get("item"),
+            "raw_object": approved,
+            "review_record": (approved.get("reviews") or [None])[-1],
+        }
+
+    def reject_learning_object(
+        self,
+        *,
+        object_type: str,
+        object_id: str,
+        reviewer: str = "local_user",
+        note: str | None = None,
+        evidence_refs: list[str] | None = None,
+        version: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_type = object_type.strip().lower()
+        if normalized_type not in {"procedure", "habit", "skill"}:
+            raise ValueError("learning reject object_type must be procedure, habit, or skill")
+        object_id = str(object_id).strip()
+        if not object_id:
+            return {}
+
+        if normalized_type == "skill":
+            before = self.show_learning_object(object_type="skill", object_id=object_id)
+            if not before:
+                return {}
+            previous_status = str((before.get("item") or {}).get("status") or "")
+            rejection = self.skill_lifecycle.approve_skill(
+                object_id,
+                version=version,
+                approver=reviewer,
+                approved=False,
+                rationale=note,
+            )
+            detail = self.show_learning_object(object_type="skill", object_id=object_id)
+            return {
+                "schema_version": "learning-operation/v1",
+                "generated_at": detail.get("generated_at"),
+                "operation": "reject",
+                "object_type": "skill",
+                "id": object_id,
+                "status": (detail.get("item") or {}).get("status"),
+                "previous_status": previous_status,
+                "item": detail.get("item"),
+                "raw_object": detail.get("raw_object"),
+                "approval_record": rejection.get("approval_record"),
+                "approval_policy": rejection.get("approval_policy"),
+            }
+
+        procedure = self.procedure_memory.get(object_id)
+        if procedure is None:
+            return {}
+        current_status = str(procedure.get("status") or "").lower()
+        if normalized_type == "habit" and current_status != "habit":
+            raise ValueError("learning reject --type habit requires a habit object")
+        if normalized_type == "procedure" and current_status == "habit":
+            raise ValueError(
+                "learning reject --type procedure does not target habits; use --type habit"
+            )
+
+        rejected = self.procedure_memory.review(
+            object_id,
+            decision="rejected",
+            reviewer=reviewer,
+            note=note,
+            evidence_refs=evidence_refs,
+        )
+        detail = self.show_learning_object(
+            object_type=normalized_type,
+            object_id=object_id,
+            include_disabled=True,
+        )
+        return {
+            "schema_version": "learning-operation/v1",
+            "generated_at": detail.get("generated_at"),
+            "operation": "reject",
+            "object_type": normalized_type,
+            "id": object_id,
+            "status": rejected.get("status"),
+            "previous_status": current_status,
+            "item": detail.get("item"),
+            "raw_object": rejected,
+            "review_record": (rejected.get("reviews") or [None])[-1],
+        }
+
+    def request_changes_learning_object(
+        self,
+        *,
+        object_type: str,
+        object_id: str,
+        reviewer: str = "local_user",
+        note: str | None = None,
+        evidence_refs: list[str] | None = None,
+    ) -> dict[str, Any]:
+        normalized_type = object_type.strip().lower()
+        if normalized_type not in {"procedure", "habit"}:
+            raise ValueError(
+                "learning request-changes object_type must be procedure or habit"
+            )
+        object_id = str(object_id).strip()
+        if not object_id:
+            return {}
+
+        procedure = self.procedure_memory.get(object_id)
+        if procedure is None:
+            return {}
+        current_status = str(procedure.get("status") or "").lower()
+        if normalized_type == "habit" and current_status != "habit":
+            raise ValueError("learning request-changes --type habit requires a habit object")
+        if normalized_type == "procedure" and current_status == "habit":
+            raise ValueError(
+                "learning request-changes --type procedure does not target habits; use --type habit"
+            )
+
+        reviewed = self.procedure_memory.review(
+            object_id,
+            decision="needs_changes",
+            reviewer=reviewer,
+            note=note,
+            evidence_refs=evidence_refs,
+        )
+        detail = self.show_learning_object(
+            object_type="procedure",
+            object_id=object_id,
+            include_disabled=True,
+        )
+        return {
+            "schema_version": "learning-operation/v1",
+            "generated_at": detail.get("generated_at"),
+            "operation": "request_changes",
+            "object_type": normalized_type,
+            "id": object_id,
+            "status": reviewed.get("status"),
+            "previous_status": current_status,
+            "item": detail.get("item"),
+            "raw_object": reviewed,
+            "review_record": (reviewed.get("reviews") or [None])[-1],
+        }
+
+    def _list_experience_records(self) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def add_record(record: dict[str, Any]) -> None:
+            experience_id = str(record.get("experience_id") or "")
+            task_id = str(record.get("task_id") or "")
+            key = experience_id or task_id
+            if key and key in seen:
+                return
+            if key:
+                seen.add(key)
+            records.append(record)
+
+        index_path = self.workspace_root / "experience" / "index.jsonl"
+        if index_path.exists():
+            for raw_line in index_path.read_text(encoding="utf-8").splitlines():
+                if not raw_line.strip():
+                    continue
+                try:
+                    indexed = json.loads(raw_line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(indexed, dict):
+                    continue
+                task_id = indexed.get("task_id")
+                record_path = (
+                    self.workspace_root
+                    / "tasks"
+                    / str(task_id)
+                    / "experience"
+                    / "experience_record.json"
+                )
+                if task_id and record_path.exists():
+                    try:
+                        payload = json.loads(record_path.read_text(encoding="utf-8"))
+                    except json.JSONDecodeError:
+                        payload = indexed
+                    if isinstance(payload, dict):
+                        add_record(payload)
+                    continue
+                add_record(indexed)
+
+        tasks_root = self.workspace_root / "tasks"
+        if tasks_root.exists():
+            for record_path in sorted(tasks_root.glob("*/experience/experience_record.json")):
+                try:
+                    payload = json.loads(record_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict):
+                    add_record(payload)
+
+        records.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+        return records
 
     def list_tasks(self, *, limit: int = 20, status: str | None = None):
         self._reconcile_stale_runtime_tasks()
@@ -708,28 +1634,14 @@ class RuntimeGateway:
             approver=approver,
             rationale=rationale,
         )
-        generated_skill = self.auto_skill_generator.generate_for_workflow_candidate(
-            payload["candidate"]
-        )
         candidate_metadata = {
             "solidification_triggered_at": utc_now(),
+            "solidification_result": "blocked_requires_habit",
+            "solidification_blocker": (
+                "META-010 skill promotion requires stable habit lineage; "
+                "use skill promote-habit after procedure promotion"
+            ),
         }
-        if generated_skill is None:
-            candidate_metadata["solidification_result"] = "unsupported_generation_shape"
-        else:
-            generated_version = None
-            if generated_skill.get("draft") is not None:
-                generated_version = generated_skill["draft"].version
-            elif generated_skill.get("registry_entry") is not None:
-                generated_version = generated_skill["registry_entry"].get("version")
-            candidate_metadata.update(
-                {
-                    "solidification_result": "generated_skill_created",
-                    "solidified_generated_skill_name": generated_skill["skill_name"],
-                    "solidified_generated_version": generated_version,
-                    "solidified_generated_status": generated_skill["status"],
-                }
-            )
         updated_candidate = self.workflow_compiler.update_candidate_status(
             str(payload["candidate"]["skill_name"]),
             version=str(payload["candidate"].get("version"))
@@ -740,8 +1652,36 @@ class RuntimeGateway:
         )
         if updated_candidate is not None:
             payload["candidate"] = updated_candidate
-        payload["generated_skill"] = generated_skill
+        payload["generated_skill"] = None
         self.graph_memory.record_workflow_candidate(payload["candidate"])
+        return payload
+
+    def promote_habit_to_skill(
+        self,
+        procedure_id: str,
+        *,
+        skill_name: str | None = None,
+        version: str | None = None,
+        approver: str = "local_user",
+        rationale: str | None = None,
+    ) -> dict[str, Any]:
+        procedure = self.procedure_memory.get(procedure_id)
+        if procedure is None:
+            raise OmniAgentError(
+                ErrorCode.NOT_FOUND,
+                f"procedure not found: {procedure_id}",
+                details={"procedure_id": procedure_id},
+            )
+        payload = self.skill_lifecycle.promote_habit_to_skill(
+            procedure,
+            skill_name=skill_name,
+            version=version,
+            approver=approver,
+            rationale=rationale,
+        )
+        registry_entry = payload.get("registry_entry")
+        if registry_entry is not None:
+            self.graph_memory.record_skill(registry_entry.to_dict())
         return payload
 
     def run_scheduler(
@@ -856,10 +1796,7 @@ class RuntimeGateway:
                 if age_seconds < stale_after_seconds:
                     continue
                 now = utc_now()
-                message = (
-                    f"任务在 {int(age_seconds)} 秒内没有状态更新，"
-                    "已按中断运行标记为 failed。"
-                )
+                message = f"任务在 {int(age_seconds)} 秒内没有状态更新，已按中断运行标记为 failed。"
                 task.status = TaskStatus.FAILED
                 task.summary = task.summary or message
                 task.error_code = "stale_task_reconciled"
@@ -1001,9 +1938,7 @@ class RuntimeGateway:
             self.graph_memory.record_thread(thread)
         return active_task, pending_checkpoint
 
-    def _current_pending_checkpoint(
-        self, thread: ConversationThread
-    ) -> PendingCheckpoint | None:
+    def _current_pending_checkpoint(self, thread: ConversationThread) -> PendingCheckpoint | None:
         checkpoint = None
         if thread.pending_checkpoint_id:
             checkpoint = self.store.get_pending_checkpoint(thread.pending_checkpoint_id)
@@ -1455,7 +2390,9 @@ class RuntimeGateway:
             merged_metadata.update(metadata)
         return TaskRequest(
             goal=effective_goal,
-            expected_output=expected_output if expected_output is not None else original.expected_output,
+            expected_output=expected_output
+            if expected_output is not None
+            else original.expected_output,
             payload=dict(original.payload),
             executor=original.executor,
             skill_name=original.skill_name,
@@ -2111,10 +3048,7 @@ class RuntimeGateway:
         )
         evaluation = task_report.completion_evaluation
         if evaluation is not None and not evaluation.task_satisfied:
-            message += (
-                "\ncompletion: not_satisfied"
-                f"\ncompletion_summary: {evaluation.summary}"
-            )
+            message += f"\ncompletion: not_satisfied\ncompletion_summary: {evaluation.summary}"
             if evaluation.missing_requirements:
                 message += "\nmissing_requirements: " + "；".join(
                     evaluation.missing_requirements[:5]

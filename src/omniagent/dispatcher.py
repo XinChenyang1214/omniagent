@@ -453,6 +453,7 @@ class SkillDispatcher:
                     "task_dir": str(context.sandbox.translate_path(context.task_dir)),
                     "sandbox": context.sandbox,
                     "bootstrap": context.bootstrap.documents,
+                    "agent_state_summary": context.agent_state_summary,
                     "memory_summaries": context.bootstrap.memory_summaries,
                     "workflow_summaries": context.bootstrap.workflow_summaries,
                 },

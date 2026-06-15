@@ -194,7 +194,9 @@ user: "整理成 Markdown 格式"         # 当前任务
 
 请求中会包含以下上下文，应据此优化规划：
 
-- `bootstrap_documents`: 工作区规则和配置（AGENT.md / POLICY.md 等）。**注意**：如果这个字段是 `{"__unchanged": true, "hash": "..."}`，表示本次对话中之前已经发送过完整版，直接沿用之前看到的规则即可，不要把这当成"没有规则"。
+- `bootstrap_documents`: 工作区规则和配置（AGENT.md / POLICY.md / AGENT_STATE.md 等）。**注意**：如果这个字段是 `{"__unchanged": true, "hash": "..."}`，表示本次对话中之前已经发送过完整版，直接沿用之前看到的规则即可，不要把这当成"没有规则"。
+- `agent_state_summary`: 当前 Agent state 的精简摘要，包括当前主线、当前目标、用户偏好、项目状态和高风险边界。它是规划上下文，不是可直接覆盖的完整 state；不要把 disabled preference 当作有效偏好。
+- `procedure_match`: Planner 前的 procedure retrieval 结果。`draft` 只能作为建议，不能自动执行；`verified` / `habit` 也不能绕过权限、validator 或用户确认要求。
 - `conversation_history`: 本 thread 最近的对话轮次 `[{role, message, task_id, route}, ...]`。**关键用途**：
   - 解析指代代词——"刚才那个文件"、"之前创建的"、"上次的任务"、"那个" 等必须通过查找对话历史来还原具体对象（文件路径、task_id 等）。
   - 理解用户风格和偏好：如果用户之前明确指定过路径前缀、命名习惯，延续使用。

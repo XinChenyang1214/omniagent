@@ -16,7 +16,7 @@
 
 这不是替代单元测试，而是覆盖真实 LLM、Planner、Skill 选择、权限、Executor、Critic、Responder 的端到端验收。
 
-## 当前优先级状态（2026-05-21）
+## 当前优先级状态（2026-06-12）
 
 `REAL-EVAL-005` 第二批真实场景矩阵已完成。`CAP-EVAL-001` 阶段 0-4 已完成，`REAL-EVAL-006` 复杂真实场景矩阵已归档为回归集。
 
@@ -33,7 +33,10 @@
 - 已归档基线场景数：33。
 - 已归档非 Git 场景：32/32 已有通过记录。
 - 已归档 Git 场景：`git_status_readonly_report` 按用户要求未执行，不纳入本次归档通过口径。
-- 当前场景文件总数：39；默认非 Git 基线 `eval_runs/20260521_073254/` 为 27 passed / 0 failed / 11 skipped；复杂矩阵 `eval_runs/20260521_092801/` 为 8 passed / 0 failed / 0 skipped；`git_status_readonly_report` 仍按用户要求未执行。
+- 当前场景文件总数：41；默认非 Git 基线 `eval_runs/20260521_073254/` 为 27 passed / 0 failed / 11 skipped；复杂矩阵 `eval_runs/20260521_092801/` 为 8 passed / 0 failed / 0 skipped；learning-loop 场景 `eval_runs/20260612_034828/` 和 `eval_runs/20260613_042808/` 均为 1 passed / 0 failed / 0 skipped；`git_status_readonly_report` 仍按用户要求未执行。
+- 跨 eval evidence index 已可通过 `poetry run python scripts/run_real_world_evals.py --build-evidence-index` 生成；当前本地索引写入 `eval_runs/evidence_index.json` / `eval_runs/evidence_index.md`，覆盖 67 个 run、463 个 case，并在 JSON `summary` 与 Markdown summary 中展示 status / scenario / category / requires / skip reason / failure layer 分布。
+- evidence index 可通过 `poetry run python scripts/run_real_world_evals.py --query-evidence-index` 查询，支持按 failure layer、used skill、procedure id、habit id、skill lineage、scenario id、promotion generation type、promotion source target、category、requires、skip reason、permission summary、completion evaluation failure layer、ExecutionPolicy policy decision、ExecutionPolicy skipped stage、ExecutionPolicy risk flag、ExecutionPolicy reason、ExecutionPolicy context budget、LLM request payload stats、TaskGraph node status、Critic action、memory retrieval / embedding signal、LLM usage / token / duration signal、learning evidence kind、learning validation evidence、skill validation status、procedure / habit review decision 和 audit event 过滤，并可输出 Markdown / JSON 回归报告视图。
+- evidence dashboard 可通过 `poetry run python scripts/run_real_world_evals.py --evidence-dashboard` 生成，默认写入 `eval_runs/evidence_dashboard.md`，固定包含失败修复入口、regression commands（含 failed scenario rerun 命令、固定视图查询、eval coverage status / scenario / category / requires / skip reason 动态查询、used skill 动态查询、procedure id 动态查询、habit id 动态查询、lineage skill 动态查询、promotion generation type 动态查询、promotion source target 动态查询、permission summary 动态查询、completion layer 非 `none` 动态查询、policy decision 动态查询、skipped stage 动态查询、policy risk flag 动态查询、policy reason 动态查询、policy context budget / request payload stats 高水位动态查询、node status `status:*` / `attempts:*` / `error:*` 动态查询、critic action `action:*` 动态查询、memory retrieval 低基数状态动态查询、LLM usage 低基数 token / duration / call-state 动态查询、learning kind 动态查询、learning validation 动态查询、skill validation 动态查询、learning review decision 动态查询和 learning audit event 动态查询）、eval coverage（status / scenario / category / requires / skip reason）、skipped eval、failure layer 查询命令、skill/tool 失败、model capability、node execution、critic action、completion evaluation、memory retrieval、LLM usage、runtime cost hotspot、execution policy、Planner skipped、policy risk flag、policy reason、policy context budget、request payload stats、permission governance、habit fast path、learning match explanation、learning gate、learning governance、learning history、learning approval、learning promotion、learning validation、learning edit、learning request-changes、learning decay、learning disable、learning restore、learning rollback、learning rejection、learning audit gap、generated habit skill 使用、skill lifecycle governance、skill promotion coverage、skill approval gate 和 learning lineage cases；需要单独导出可复制命令清单时，使用 `--evidence-dashboard-commands-output eval_runs/evidence_dashboard.commands`。
 - 新增 8 个 `requires: ["complex"]` 的复杂场景已通过完整矩阵回归。
 - 最近关键证据：
   - `eval_runs/20260520_105058/`：上下文召回卫生场景通过。
@@ -41,6 +44,8 @@
   - `eval_runs/20260520_143007/`：剩余 5 个非 Git 基础能力场景初跑，4 passed / 1 failed。
   - `eval_runs/20260520_144321/`：修复 `builtin.data.config` TOML section query alias 后，`config_toml_report` 复跑通过。
   - `eval_runs/20260520_165848/`：新增 5 个复杂专项场景完整回归通过。
+  - `eval_runs/20260612_034828/`：`META-010` learning-loop habit-promoted skill lineage 场景通过。
+  - `eval_runs/20260613_042808/`：`META-010` JSONL habit-promoted skill lineage 场景通过，policy artifact 为 `direct_execute`，`skipped_stages=["planner"]`，并可通过 `--evidence-promotion-source-target jsonl` 从 evidence index 查询。
 - `eval_runs/20260521_073254/`：默认非 Git 基线最终通过。
 - `eval_runs/20260521_092801/`：8 个复杂场景最终通过。
 - `eval_runs/policy_explicit_check/20260521_104629/`：META-009 显式 payload fast path 通过，diagnostics 显示 `direct_execute` 且无 Planner LLM 调用。
@@ -49,13 +54,17 @@
 
 该归档表示旧的非 Git 基线和首轮复杂专项场景可作为回归集使用，不表示可以删除场景定义或跳过后续回归。
 
-性能与成本维度也需要持续记录。`META-009` Runtime 分层执行与性能优化已经立项为架构候选，后续真实评测应在 diagnostics 中继续关注：
+性能与成本维度也需要持续记录。`META-009` Runtime 分层执行与性能优化已归档为旧实现迁移输入；`META-010` 期间真实评测应继续关注 runtime 成本，同时新增 learning-loop 证据：
 
 - 每个场景端到端 `duration_seconds`
 - Planner / Critic / Completion 的 tokens 与 latency
 - `request_payload_stats` 中 `skill_registry_entries`、召回字段和 bootstrap 字段大小
 - fast path 是否触发、为什么触发或为什么回退完整 Planner
 - 跳过 Critic / Completion 时是否有本地 artifact 证据替代
+- 是否生成 `ExperienceRecord`
+- 是否命中或拒绝 procedure / habit
+- 学习升级是否引用了 validation evidence
+- 跨 run evidence index 是否能串起 case、scenario、status / category / requires / skip reason、diagnostics、failure layer、skill usage、node status、critic action、policy decision、skipped stages、risk flags、policy reasons、policy context budget、request payload stats、LLM calls / tokens / duration、procedure / habit artifacts 和 skill lineage
 
 复杂场景默认跳过，需要显式开启：
 
@@ -153,6 +162,26 @@ poetry run python scripts/run_real_world_evals.py --include-l4
 
 ```bash
 poetry run python scripts/run_real_world_evals.py --scenario csv_sales_summary
+```
+
+从已有 `eval_runs/` 生成跨 run evidence index，不重新执行评测：
+
+```bash
+poetry run python scripts/run_real_world_evals.py --build-evidence-index
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-llm-usage llm_called
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-llm-usage "tokens:10000+,duration:60s+"
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-promotion-generation-type "json"
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-promotion-source-target "tsv"
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-policy-decision direct_execute
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-skipped-stage planner
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-policy-risk-flag planner_context_required
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-policy-reason "*风险标记*"
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-policy-context-budget "skill_registry_entries:json_chars:50000+"
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-request-payload-stats "skill_registry_entries:json_chars:10000-49999"
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-node-status status:failed
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-critic-action action:accept
+poetry run python scripts/run_real_world_evals.py --evidence-dashboard
+poetry run python scripts/run_real_world_evals.py --evidence-dashboard --evidence-dashboard-commands-output eval_runs/evidence_dashboard.commands
 ```
 
 ## 隔离策略
@@ -320,13 +349,13 @@ eval_runs/<run_id>/
 
 - 默认非 Git 基线：`eval_runs/20260521_073254/`，27 passed / 0 failed / 11 skipped。
 - 复杂矩阵：`eval_runs/20260521_092801/`，8 passed / 0 failed / 0 skipped。
-- 配置校验：`python3 scripts/run_real_world_evals.py --check-only`，当前 39 scenarios validated。
-- 本地验证：`poetry run python -m pytest tests/`，当前 463 passed；`poetry run ruff check src/ tests/ scripts/run_real_world_evals.py` 通过。
+- 配置校验：`poetry run python scripts/run_real_world_evals.py --check-only`，当前 41 scenarios validated。
+- 本地验证：`poetry run python -m pytest tests/`，当前 545 passed；`poetry run ruff check src/ tests/ scripts/run_real_world_evals.py` 通过。
 - Git 场景：`git_status_readonly_report` 按用户要求未执行。
 
 ## 已完成：第二批真实场景矩阵
 
-`REAL-EVAL-005` 已完成。第一批 10 个真实场景与第二批 10 个真实场景共同形成当前真实评测基线。后续复杂场景应另立 `REAL-EVAL-006+`，但启动前必须先完成 `CAP-EVAL-001`，并继续使用 `scripts/run_real_world_evals.py` 的隔离 workspace、`diagnostics.md` 和 `failure_layer` 归因闭环。
+`REAL-EVAL-005` 已完成。第一批 10 个真实场景与第二批 10 个真实场景共同形成当前真实评测基线；`CAP-EVAL-001` 已完成，`REAL-EVAL-006` 已归档为复杂回归集。后续复杂场景应另立 `REAL-EVAL-006+` 或新的专项批次，并继续使用 `scripts/run_real_world_evals.py` 的隔离 workspace、`diagnostics.md` 和 `failure_layer` 归因闭环。
 
 第二批真实场景的定位不是继续验证 happy path，而是系统性暴露 Agent 在错误恢复、复杂多轮、规划合理性和产物质量上的短板。后续批次必须继续使用 `scripts/run_real_world_evals.py` 的隔离 workspace、`diagnostics.md` 和 `failure_layer` 归因闭环。
 
@@ -381,7 +410,7 @@ eval_runs/<run_id>/
 
 ### 暂后方向
 
-以下方向仍保留，但排在 `CAP-EVAL-001` 之后：
+以下方向仍保留，后续应结合当前主线和真实使用痛点重新排序：
 
 - 长上下文与 token 裁剪场景
 - skill 自动生成质量场景

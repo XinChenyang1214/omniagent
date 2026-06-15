@@ -138,6 +138,19 @@ def _entry_by_name(entries: list[dict[str, Any]], name: str) -> dict[str, Any] |
     return next((item for item in entries if item.get("skill_name") == name), None)
 
 
+def _allows_direct_execute_skill(name: str, entry: dict[str, Any]) -> bool:
+    if name.startswith("builtin."):
+        return True
+    tags = {str(item).lower() for item in entry.get("tags", []) or []}
+    lifecycle_status = str(entry.get("lifecycle_status") or "active").lower()
+    return (
+        name.startswith("generated.habit.")
+        and lifecycle_status.endswith("active")
+        and "generated" in tags
+        and "habit-promoted" in tags
+    )
+
+
 @dataclass(slots=True)
 class ExecutionPolicyDecision:
     policy_decision: str
@@ -149,6 +162,7 @@ class ExecutionPolicyDecision:
     risk_flags: dict[str, bool] = field(default_factory=dict)
     context_budget: dict[str, Any] = field(default_factory=dict)
     expanded_manifest_names: list[str] = field(default_factory=list)
+    habit_fast_path: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -161,6 +175,7 @@ class ExecutionPolicyDecision:
             "risk_flags": dict(self.risk_flags),
             "context_budget": dict(self.context_budget),
             "expanded_manifest_names": list(self.expanded_manifest_names),
+            "habit_fast_path": dict(self.habit_fast_path),
         }
 
     def to_plan_result(self, request: TaskRequest) -> PlanResult:
@@ -197,6 +212,7 @@ class ExecutionPolicy:
         *,
         skill_registry_entries: list[dict[str, Any]],
         context_counts: dict[str, int] | None = None,
+        habit_fast_path: dict[str, Any] | None = None,
     ) -> ExecutionPolicyDecision:
         payload = request.payload if isinstance(request.payload, dict) else {}
         action = str(payload.get("action") or "").strip().lower()
@@ -236,6 +252,31 @@ class ExecutionPolicy:
             },
             **(context_counts or {}),
         }
+        habit_candidate = dict(habit_fast_path or {})
+
+        def habit_policy_payload(policy_decision: str, reason: str) -> dict[str, Any]:
+            if not habit_candidate:
+                return {}
+            payload = dict(habit_candidate)
+            is_candidate = payload.get("decision") == "habit_fast_path_candidate"
+            accepted = is_candidate and policy_decision == "direct_execute"
+            payload["policy_gate"] = {
+                "result": (
+                    "accepted"
+                    if accepted
+                    else "rejected_by_policy"
+                    if is_candidate
+                    else "not_applicable"
+                ),
+                "policy_decision": policy_decision,
+                "reason": reason,
+                "permission_gate_preserved": True,
+                "contract_gate_preserved": True,
+                "risk_gate_preserved": True,
+            }
+            if not accepted:
+                payload["skipped_stages"] = []
+            return payload
 
         def plan_required(reason: str) -> ExecutionPolicyDecision:
             return ExecutionPolicyDecision(
@@ -247,6 +288,7 @@ class ExecutionPolicy:
                 fallback=False,
                 risk_flags=risk_flags,
                 context_budget=context_budget,
+                habit_fast_path=habit_policy_payload("plan_required", reason),
             )
 
         if not payload:
@@ -255,8 +297,8 @@ class ExecutionPolicy:
             return plan_required("未显式指定可静态映射的 executor 或 builtin skill")
         if entry is None:
             return plan_required(f"目标 skill 未在 registry 中注册: {target_skill}")
-        if not str(target_skill).startswith("builtin."):
-            return plan_required("第一阶段 fast path 只允许 builtin skill")
+        if not _allows_direct_execute_skill(str(target_skill), entry):
+            return plan_required("fast path 只允许 builtin skill 或 active generated habit skill")
         if request.constraints.max_permission.rank > PermissionLevel.L2.rank:
             return plan_required("max_permission 高于 L2，保守回退 Planner")
         if any(risk_flags.values()):
@@ -284,11 +326,10 @@ class ExecutionPolicy:
         if blocked_effects:
             return plan_required(f"目标 action side_effect 不允许 direct_execute: {blocked_effects}")
 
+        reason = "显式 executor/skill + 结构化 payload 已通过权限、contract、风险标记和路径静态校验"
         return ExecutionPolicyDecision(
             policy_decision="direct_execute",
-            reason=(
-                "显式 executor/skill + 结构化 payload 已通过权限、contract、风险标记和路径静态校验"
-            ),
+            reason=reason,
             target_skill=target_skill,
             executor_hint=executor_hint,
             skipped_stages=["planner"],
@@ -296,6 +337,7 @@ class ExecutionPolicy:
             risk_flags=risk_flags,
             context_budget=context_budget,
             expanded_manifest_names=[target_skill],
+            habit_fast_path=habit_policy_payload("direct_execute", reason),
         )
 
     def _resolve_target(self, request: TaskRequest) -> tuple[str | None, str | None]:

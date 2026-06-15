@@ -200,7 +200,7 @@ class AutoSkillGenerationIntegrationTest(unittest.TestCase):
             Path(replacement_payload["drafts"][0].metadata["generation_report_path"]).exists()
         )
 
-    def test_workflow_promotion_can_trigger_controlled_skill_generation(self) -> None:
+    def test_workflow_promotion_requires_habit_before_skill_generation(self) -> None:
         gateway = self._build_gateway()
         first = gateway.submit(
             TaskRequest(
@@ -236,27 +236,15 @@ class AutoSkillGenerationIntegrationTest(unittest.TestCase):
             approver="tester",
             rationale="把稳定 workflow 固化成受控生成能力",
         )
-        self.assertIsNotNone(promotion["generated_skill"])
-        self.assertEqual(promotion["generated_skill"]["status"], "active")
-        self.assertEqual(promotion["candidate"]["solidification_result"], "generated_skill_created")
-        self.assertEqual(
-            promotion["candidate"]["solidified_generated_skill_name"], candidate["skill_name"]
-        )
-        self.assertEqual(promotion["candidate"]["solidified_generated_status"], "active")
+        self.assertIsNone(promotion["generated_skill"])
+        self.assertEqual(promotion["candidate"]["solidification_result"], "blocked_requires_habit")
+        self.assertIn("stable habit", promotion["candidate"]["solidification_blocker"])
 
         skill_payload = gateway.show_skill(candidate["skill_name"])
-        self.assertEqual(skill_payload["registry_entry"].lifecycle_status.value, "active")
-        self.assertEqual(
-            skill_payload["registry_entry"].version,
-            promotion["candidate"]["solidified_generated_version"],
-        )
+        self.assertEqual(skill_payload["registry_entry"].lifecycle_status.value, "draft")
         self.assertEqual(
             {draft.source_kind for draft in skill_payload["drafts"]},
-            {"generated", "workflow_compiled"},
-        )
-        self.assertEqual(
-            skill_payload["drafts"][0].metadata["generation_analysis"]["trigger"],
-            "workflow_solidification",
+            {"workflow_compiled"},
         )
         self.assertEqual(first.task.status.value, "completed")
 

@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from omniagent.agent_state import format_agent_state_summary
 from omniagent.models import (
     AutonomyMode,
     BootstrapContext,
@@ -153,11 +154,16 @@ class WorkspaceManager:
         *,
         memory_summaries: list[dict[str, Any]],
         workflow_summaries: list[dict[str, Any]],
+        agent_state_summary: dict[str, Any] | None = None,
     ) -> BootstrapContext:
+        documents = self.load_bootstrap_documents()
+        if agent_state_summary is not None:
+            documents["AGENT_STATE.md"] = format_agent_state_summary(agent_state_summary)
         return BootstrapContext(
-            documents=self.load_bootstrap_documents(),
+            documents=documents,
             memory_summaries=memory_summaries,
             workflow_summaries=workflow_summaries,
+            agent_state_summary=dict(agent_state_summary or {}),
         )
 
 
@@ -236,6 +242,7 @@ class TaskArtifactManager:
             task_dir / "context_snapshot.json",
             {
                 "bootstrap_documents": bootstrap.documents,
+                "agent_state_summary": bootstrap.agent_state_summary,
                 "memory_summaries": bootstrap.memory_summaries,
                 "workflow_summaries": bootstrap.workflow_summaries,
                 "context_refs": request.context_refs,
@@ -302,6 +309,12 @@ class TaskArtifactManager:
 
     def write_policy_decision(self, task_dir: Path, decision: dict[str, Any]) -> None:
         _write_json(task_dir / "plan" / "policy_decision.json", decision)
+
+    def write_procedure_match(self, task_dir: Path, match: dict[str, Any]) -> None:
+        _write_json(task_dir / "procedure" / "procedure_match.json", match)
+
+    def write_habit_fast_path(self, task_dir: Path, decision: dict[str, Any]) -> None:
+        _write_json(task_dir / "procedure" / "habit_fast_path.json", decision)
 
     def write_llm_call(
         self, task_dir: Path, response: LLMResponse, *, request_payload: dict[str, Any]

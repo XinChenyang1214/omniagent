@@ -8,7 +8,7 @@
 
 ## 项目定位
 
-OmniAgent 是一个以 task 为中心的本地嵌入式 Agent Runtime：
+OmniAgent 当前代码基础是一个以 task 为中心的本地嵌入式 Agent Runtime；当前产品目标是按 `docs/product-architecture.md` 重开发为以学习循环为中心的个人 Agent OS：
 
 - 单用户、单机、CLI 优先
 - 面向开发者和技术用户，可调试、可审计、可演化
@@ -17,23 +17,29 @@ OmniAgent 是一个以 task 为中心的本地嵌入式 Agent Runtime：
 - 轻量本地运行时：stdlib 核心 + 默认本地 embedding 推理依赖 + OpenAI 兼容 LLM
 - 默认离线运行，除 LLM 调用和显式授权网络任务外不访问外部网络
 
-当前代码层面已完成三阶段 MVP、P0 补丁轮、`BASECAP-001` 基础能力升级、`REAL-EVAL-005` 第二批真实场景矩阵和 `CAP-EVAL-001` 复杂能力评测前置升级。现阶段主线是 `META-009` Runtime 分层执行与性能优化：首轮已落地 `ExecutionPolicy`、策略 artifact / diagnostics、Planner capability index / expanded manifests，后续继续补本地 artifact validator、Critic / Completion 条件化和按需 manifest replan。
+当前代码层面已完成三阶段 MVP、P0 补丁轮、`BASECAP-001`、`BASECAP-002`、`REAL-EVAL-005`、`CAP-EVAL-001` 和 `META-009` 首轮落地结果；这些作为旧实现基础和迁移输入。现阶段主线切换为 `META-010` Agent usability and learning loop MVP：Phase 1 Agent state、Phase 2 Experience records、Phase 3 Procedure memory、Phase 4 Habit fast path 和 Phase 5 Skill promotion 已实现；下一步进入 learning-loop 真实评测与学习治理增强。
 
 ## 权威文档
 
-优先按以下顺序理解项目现状：
+优先按以下顺序理解项目现状和文档状态：
 
 1. `README.md`：入口文档、能力概览和快速开始
-2. `ARCHITECTURE.md`：主架构文档、模块职责、执行流程和关键设计
-3. `ROADMAP.md`：路线图和当前优先级
-4. `issue.md`：未关闭问题与近期已关闭记录
-5. `COMPLEX_CAPABILITY_EVAL_UPGRADE.md`：当前 P0 任务，复杂能力评测前置升级
-6. `REAL_WORLD_EVAL_PLAN.md`：真实场景自主评测闭环
-7. `BASIC_CAPABILITIES_UPGRADE.md`：已完成的基础能力升级专项记录
-8. `CONFIGURATION.md`：配置项和环境变量参考
-9. `CLAUDE.md`：其他 AI 编程助手的项目指南
+2. `docs/doc-registry.md`：文档类型、生命周期状态、权威边界和替代关系
+3. `docs/product-architecture.md`：目标产品架构、学习闭环和后续产品路线取舍
+4. `docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md`：当前 `META-010` 重开发专项和验收矩阵
+5. `docs/specs/agent-state.md`：Agent state 最小数据契约和验收标准
+6. `docs/specs/experience-record.md`：任务经验记录 schema、写入时机和 learning gate
+7. `docs/specs/procedure-memory.md`：procedure / habit 生命周期和升级规则
+8. `docs/specs/skill-promotion.md`：habit -> skill promotion gate、lineage、contract 和权限规则
+9. `ARCHITECTURE.md`：旧实现架构、模块职责、执行流程和迁移输入
+10. `ROADMAP.md`：路线图和当前优先级
+11. `issue.md`：未关闭问题与近期已关闭记录
+12. `REAL_WORLD_EVAL_PLAN.md`：真实场景自主评测闭环
+13. `CONFIGURATION.md`：配置项和环境变量参考
+14. `docs/archive/pre-product-redesign/`：重开发前旧阶段过程文档归档
+15. `CLAUDE.md`：其他 AI 编程助手的项目指南
 
-代码是事实来源。文档与代码冲突时，以代码为准，并同步更新相关文档。
+代码是当前实现事实来源；目标产品方向以 `docs/product-architecture.md` 和 `META-010` workstream 为准。文档与代码冲突时，应区分“旧实现事实”和“新目标契约”，不要把旧实现误当成新架构要求。
 
 ## 目录与模块
 
@@ -205,7 +211,7 @@ poetry run python -m pytest tests/
 poetry run ruff check src/ tests/ scripts/run_real_world_evals.py
 ```
 
-当前复杂场景评测已归档为回归集，`META-009` 期间真实场景评测主要用于维护现有基线、验证 Runtime 分层策略，并为 completion evaluation、模型能力归因、真实 embedding 召回和策略决策提供证据。运行后重点查看：
+当前复杂场景评测已归档为旧实现回归集。`META-010` 期间真实场景评测应继续维护旧基线，同时新增 learning-loop evidence，验证 Agent state、ExperienceRecord、procedure / habit 命中、validation evidence 和 skill promotion lineage。运行后重点查看：
 
 - `eval_runs/<run_id>/summary.md`
 - `eval_runs/<run_id>/cases/<scenario_id>/result.json`
@@ -215,6 +221,8 @@ poetry run ruff check src/ tests/ scripts/run_real_world_evals.py
 - `eval_runs/<run_id>/workspaces/<scenario_id>/tasks/<task_id>/critic/`
 - `eval_runs/<run_id>/workspaces/<scenario_id>/tasks/<task_id>/completion/`
 - `eval_runs/<run_id>/workspaces/<scenario_id>/tasks/<task_id>/llm_calls/`
+- `eval_runs/<run_id>/workspaces/<scenario_id>/tasks/<task_id>/learning/`（如已实现）
+- `eval_runs/<run_id>/workspaces/<scenario_id>/tasks/<task_id>/experience/`（如已实现）
 
 评测暴露的问题应按失败层级归因：Router、Planner、skill selection、permission、executor、Critic、Responder、LLM provider 或场景配置。
 

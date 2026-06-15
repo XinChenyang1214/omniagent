@@ -117,7 +117,14 @@ Runtime workspace at `./workspace/` is auto-bootstrapped on first run. Each task
 
 The current project document order is defined in `AGENTS.md`:
 - `README.md` — entrypoint, capability overview, quick start
-- `ARCHITECTURE.md` — architecture, module responsibilities, execution flow
+- `docs/doc-registry.md` — document authority, lifecycle status, and replacement map
+- `docs/product-architecture.md` — target product architecture and learning loop
+- `docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md` — current META-010 implementation workstream
+- `docs/specs/agent-state.md` — Agent state data contract and acceptance criteria
+- `docs/specs/experience-record.md` — experience record schema and learning gate
+- `docs/specs/procedure-memory.md` — procedure and habit lifecycle rules
+- `docs/specs/skill-promotion.md` — habit to skill promotion gate, lineage, contracts, and permissions
+- `ARCHITECTURE.md` — legacy implementation architecture and migration input
 - `ROADMAP.md` — roadmap and priorities
 - `issue.md` — open issues and recently closed records
 - `REAL_WORLD_EVAL_PLAN.md` — real-world autonomous eval loop

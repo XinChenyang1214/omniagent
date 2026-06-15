@@ -94,10 +94,193 @@ def _print_thread_payload(payload: dict[str, Any], stream: TextIO) -> None:
         print(f"- {event['event_type']}: {event['payload']}", file=stream)
 
 
+def _print_agent_state_payload(payload: dict[str, Any], stream: TextIO) -> None:
+    if {"profile", "preferences", "project", "goal"}.issubset(payload):
+        for section in ("profile", "preferences", "project", "goal"):
+            print(f"{section}:", file=stream)
+            print(json.dumps(payload[section], ensure_ascii=False, indent=2), file=stream)
+        return
+    for key, value in payload.items():
+        if isinstance(value, (dict, list)):
+            rendered = json.dumps(value, ensure_ascii=False, indent=2)
+            print(f"{key}: {rendered}", file=stream)
+        else:
+            print(f"{key}: {value}", file=stream)
+
+
+def _print_procedure_payload(payload: dict[str, Any], stream: TextIO) -> None:
+    for key in (
+        "procedure_id",
+        "name",
+        "status",
+        "risk_level",
+        "confidence",
+        "success_count",
+        "failure_count",
+        "review_status",
+        "last_reviewed_at",
+        "reviewed_by",
+    ):
+        if key in payload:
+            print(f"{key}: {payload[key]}", file=stream)
+    if payload.get("trigger"):
+        print(f"trigger: {json.dumps(payload['trigger'], ensure_ascii=False)}", file=stream)
+    if payload.get("source_experience_ids"):
+        print(
+            "source_experience_ids: " + ", ".join(payload["source_experience_ids"]),
+            file=stream,
+        )
+    if payload.get("steps"):
+        print("steps:", file=stream)
+        for step in payload["steps"]:
+            print(
+                f"- {step.get('step_id')} {step.get('action_type')} {step.get('target')}",
+                file=stream,
+            )
+    if payload.get("reviews"):
+        print("reviews:", file=stream)
+        for review in payload["reviews"][-3:]:
+            print(
+                f"- {review.get('decision')} by {review.get('reviewer')} "
+                f"at {review.get('created_at')}",
+                file=stream,
+            )
+
+
+def _print_procedure_match(payload: dict[str, Any], stream: TextIO) -> None:
+    print(f"matched: {payload.get('matched')}", file=stream)
+    print(f"matched_procedure_id: {payload.get('matched_procedure_id') or 'none'}", file=stream)
+    print(f"confidence: {payload.get('confidence')}", file=stream)
+    print(f"reason: {payload.get('reason')}", file=stream)
+    print(f"suggestion_mode: {payload.get('suggestion_mode')}", file=stream)
+    print(f"required_confirmation: {payload.get('required_confirmation')}", file=stream)
+    rejected = payload.get("rejected_candidates") or []
+    if rejected:
+        print("rejected_candidates:", file=stream)
+        for item in rejected:
+            print(
+                f"- {item.get('procedure_id')}: {item.get('reason')} "
+                f"confidence={item.get('confidence', '-')}",
+                file=stream,
+            )
+
+
+def _print_learning_review(payload: dict[str, Any], stream: TextIO) -> None:
+    summary = payload.get("summary") or {}
+    print(f"schema_version: {payload.get('schema_version')}", file=stream)
+    print(f"total: {summary.get('total', 0)}", file=stream)
+    print(
+        f"experiences: {summary.get('experiences', 0)} "
+        f"procedures: {summary.get('procedures', 0)} "
+        f"habits: {summary.get('habits', 0)} "
+        f"skills: {summary.get('skills', 0)}",
+        file=stream,
+    )
+    print(
+        f"requires_review: {summary.get('requires_review', 0)} findings: {summary.get('findings', 0)}",
+        file=stream,
+    )
+    for item in payload.get("items", []):
+        findings = item.get("findings") or []
+        print(
+            f"- {item.get('object_type')}:{item.get('id')} "
+            f"status={item.get('status')} review={item.get('review_status')} "
+            f"risk={item.get('risk_level')} findings={len(findings)}",
+            file=stream,
+        )
+        if findings:
+            first = findings[0]
+            print(
+                f"  first_finding={first.get('severity')}:{first.get('code')}",
+                file=stream,
+            )
+
+
+def _print_learning_match(payload: dict[str, Any], stream: TextIO) -> None:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    match = payload.get("match") if isinstance(payload.get("match"), dict) else {}
+    matched_item = (
+        payload.get("matched_item") if isinstance(payload.get("matched_item"), dict) else {}
+    )
+    print(f"schema_version: {payload.get('schema_version')}", file=stream)
+    print(f"matched: {summary.get('matched')}", file=stream)
+    print(f"matched_object_type: {summary.get('matched_object_type') or 'none'}", file=stream)
+    print(f"matched_id: {summary.get('matched_id') or 'none'}", file=stream)
+    print(f"confidence: {match.get('confidence')}", file=stream)
+    print(f"suggestion_mode: {summary.get('suggestion_mode')}", file=stream)
+    print(f"requires_confirmation: {summary.get('requires_confirmation')}", file=stream)
+    if matched_item:
+        print(
+            f"matched_review: status={matched_item.get('status')} "
+            f"review={matched_item.get('review_status')} "
+            f"risk={matched_item.get('risk_level')} "
+            f"findings={len(matched_item.get('findings') or [])}",
+            file=stream,
+        )
+    rejected = payload.get("rejected_candidate_items") or []
+    if rejected:
+        print("rejected_candidates:", file=stream)
+        for item in rejected:
+            print(
+                f"- {item.get('procedure_id')}: {item.get('reason')} "
+                f"status={item.get('status', '-')} "
+                f"confidence={item.get('confidence', '-')}",
+                file=stream,
+            )
+
+
+def _print_learning_object(payload: dict[str, Any], stream: TextIO) -> None:
+    item = payload.get("item") if isinstance(payload.get("item"), dict) else {}
+    findings = [entry for entry in list(item.get("findings") or []) if isinstance(entry, dict)]
+    next_actions = [str(entry) for entry in list(item.get("next_actions") or [])]
+    print(f"schema_version: {payload.get('schema_version')}", file=stream)
+    if payload.get("operation"):
+        print(f"operation: {payload.get('operation')}", file=stream)
+    print(f"object_type: {payload.get('object_type')}", file=stream)
+    print(f"id: {item.get('id') or payload.get('id')}", file=stream)
+    if payload.get("previous_status"):
+        print(f"previous_status: {payload.get('previous_status')}", file=stream)
+    print(f"name: {item.get('name')}", file=stream)
+    print(f"status: {item.get('status')}", file=stream)
+    print(f"review_status: {item.get('review_status')}", file=stream)
+    print(f"risk_level: {item.get('risk_level')}", file=stream)
+    print(f"requires_review: {item.get('requires_review')}", file=stream)
+    if findings:
+        print("findings:", file=stream)
+        for finding in findings:
+            print(
+                f"- {finding.get('severity')} {finding.get('code')}: {finding.get('message')}",
+                file=stream,
+            )
+    if next_actions:
+        print("next_actions:", file=stream)
+        for action in next_actions:
+            print(f"- {action}", file=stream)
+
+
+def _print_learning_history(payload: dict[str, Any], stream: TextIO) -> None:
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    print(f"schema_version: {payload.get('schema_version')}", file=stream)
+    print(f"object_type: {payload.get('object_type')}", file=stream)
+    print(f"id: {payload.get('id')}", file=stream)
+    print(f"events: {summary.get('events', 0)}", file=stream)
+    for event in payload.get("events", []):
+        if not isinstance(event, dict):
+            continue
+        print(
+            f"- {event.get('created_at') or '-'} "
+            f"{event.get('source')}:{event.get('event')} "
+            f"status={event.get('status') or '-'} "
+            f"version={event.get('version') or '-'}",
+            file=stream,
+        )
+
+
 def _print_repl_help(stream: TextIO) -> None:
     print(
         "repl_commands: /help /status /thread /show /switch <thread_id> /resume <thread_id>"
-        " /allow [delete|network] /deny [delete|network] /exit",
+        " /state [profile|preferences|project|goal] /allow [delete|network]"
+        " /deny [delete|network] /exit",
         file=stream,
     )
 
@@ -186,6 +369,16 @@ def _run_chat_repl(gateway: RuntimeGateway, args: argparse.Namespace, stream: Te
                 print(f"thread not found: {current_thread_id}", file=sys.stderr)
                 return 1
             _print_thread_payload(payload, stream)
+            continue
+        if message == "/state" or message.startswith("/state "):
+            parts = message.split(maxsplit=1)
+            section = parts[1].strip() if len(parts) > 1 else None
+            try:
+                payload = gateway.show_agent_state(section=section)
+            except ValueError as exc:
+                print(f"state error: {exc}", file=stream)
+                continue
+            _print_agent_state_payload(payload, stream)
             continue
         if message == "/allow" or message.startswith("/allow "):
             if _apply_repl_constraint(message, args, stream, enable=True):
@@ -369,6 +562,291 @@ def build_parser() -> argparse.ArgumentParser:
     chat_repl.add_argument("--allow-delete", action="store_true")
     chat_repl.add_argument("--timeout", type=int)
 
+    state_parser = subparsers.add_parser("state", help="查看 Agent state")
+    state_subparsers = state_parser.add_subparsers(dest="state_command", required=True)
+
+    state_show = state_subparsers.add_parser("show", help="显示当前 Agent state")
+    state_show.add_argument("--section", choices=["profile", "preferences", "project", "goal"])
+    state_show.add_argument("--json", action="store_true")
+
+    procedure_parser = subparsers.add_parser("procedure", help="管理 Procedure memory")
+    procedure_subparsers = procedure_parser.add_subparsers(dest="procedure_command", required=True)
+
+    procedure_list = procedure_subparsers.add_parser("list", help="列出 procedures")
+    procedure_list.add_argument("--include-disabled", action="store_true")
+    procedure_list.add_argument("--json", action="store_true")
+
+    procedure_show = procedure_subparsers.add_parser("show", help="查看 procedure")
+    procedure_show.add_argument("procedure_id")
+    procedure_show.add_argument("--json", action="store_true")
+
+    procedure_disable = procedure_subparsers.add_parser("disable", help="禁用 procedure")
+    procedure_disable.add_argument("procedure_id")
+    procedure_disable.add_argument("--note")
+    procedure_disable.add_argument("--json", action="store_true")
+
+    procedure_edit = procedure_subparsers.add_parser("edit", help="受控编辑 procedure")
+    procedure_edit.add_argument("procedure_id")
+    procedure_edit.add_argument(
+        "--patch",
+        required=True,
+        help="JSON object; allowed fields: name, trigger, risk_level, required_permissions, inputs, steps, outputs, validator",
+    )
+    procedure_edit.add_argument("--note")
+    procedure_edit.add_argument("--reviewer", default="local_user")
+    procedure_edit.add_argument("--json", action="store_true")
+
+    procedure_review = procedure_subparsers.add_parser("review", help="审核 procedure 学习内容")
+    procedure_review.add_argument("procedure_id")
+    procedure_review.add_argument(
+        "--decision",
+        required=True,
+        choices=["approved", "needs_changes", "rejected"],
+    )
+    procedure_review.add_argument("--reviewer", default="local_user")
+    procedure_review.add_argument("--note")
+    procedure_review.add_argument("--evidence-ref", action="append", default=[])
+    procedure_review.add_argument("--json", action="store_true")
+
+    procedure_promote_habit = procedure_subparsers.add_parser(
+        "promote-habit",
+        help="将满足验证门槛的 verified procedure 升级为 habit",
+    )
+    procedure_promote_habit.add_argument("procedure_id")
+    procedure_promote_habit.add_argument("--note")
+    procedure_promote_habit.add_argument(
+        "--require-confirmation",
+        action="store_true",
+        help="允许高风险 habit，但后续匹配仍必须要求人工确认",
+    )
+    procedure_promote_habit.add_argument("--json", action="store_true")
+
+    procedure_explain = procedure_subparsers.add_parser(
+        "explain-match",
+        help="解释给定任务目标或 task_id 的 procedure retrieval 结果",
+    )
+    procedure_explain.add_argument("task_or_goal")
+    procedure_explain.add_argument("--json", action="store_true")
+
+    learning_parser = subparsers.add_parser("learning", help="审计学习对象")
+    learning_subparsers = learning_parser.add_subparsers(dest="learning_command", required=True)
+
+    learning_review = learning_subparsers.add_parser(
+        "review",
+        help="统一审计 experience / procedure / habit / skill 学习对象",
+    )
+    learning_review.add_argument(
+        "--type",
+        dest="object_type",
+        default="all",
+        choices=["all", "experience", "procedure", "habit", "skill"],
+    )
+    learning_review.add_argument("--status")
+    learning_review.add_argument("--include-disabled", action="store_true")
+    learning_review.add_argument("--json", action="store_true")
+
+    learning_show = learning_subparsers.add_parser(
+        "show",
+        help="查看单个 experience / procedure / habit / skill 学习对象",
+    )
+    learning_show.add_argument(
+        "--type",
+        dest="object_type",
+        required=True,
+        choices=["experience", "procedure", "habit", "skill"],
+    )
+    learning_show.add_argument("object_id")
+    learning_show.add_argument("--include-disabled", action="store_true")
+    learning_show.add_argument("--json", action="store_true")
+
+    learning_history = learning_subparsers.add_parser(
+        "history",
+        help="查看 learning object 的审计历史",
+    )
+    learning_history.add_argument(
+        "--type",
+        dest="object_type",
+        required=True,
+        choices=["experience", "procedure", "habit", "skill"],
+    )
+    learning_history.add_argument("object_id")
+    learning_history.add_argument("--include-disabled", action="store_true")
+    learning_history.add_argument("--json", action="store_true")
+
+    learning_explain = learning_subparsers.add_parser(
+        "explain-match",
+        help="通过统一学习治理入口解释任务目标的 procedure / habit retrieval 结果",
+    )
+    learning_explain.add_argument("task_or_goal")
+    learning_explain.add_argument("--json", action="store_true")
+
+    learning_edit = learning_subparsers.add_parser(
+        "edit",
+        help="通过统一学习治理入口受控编辑 procedure / habit",
+    )
+    learning_edit.add_argument(
+        "--type",
+        dest="object_type",
+        required=True,
+        choices=["procedure", "habit"],
+    )
+    learning_edit.add_argument("object_id")
+    learning_edit.add_argument(
+        "--patch",
+        required=True,
+        help="JSON object; allowed fields: name, trigger, risk_level, required_permissions, inputs, steps, outputs, validator",
+    )
+    learning_edit.add_argument("--note")
+    learning_edit.add_argument("--reviewer", default="local_user")
+    learning_edit.add_argument("--json", action="store_true")
+
+    learning_decay = learning_subparsers.add_parser(
+        "decay",
+        help="通过统一学习治理入口将过期 procedure / habit 降级为需复审状态",
+    )
+    learning_decay.add_argument(
+        "--type",
+        dest="object_type",
+        required=True,
+        choices=["procedure", "habit"],
+    )
+    learning_decay.add_argument("object_id")
+    learning_decay.add_argument("--note")
+    learning_decay.add_argument("--reviewer", default="local_user")
+    learning_decay.add_argument("--json", action="store_true")
+
+    learning_promote = learning_subparsers.add_parser(
+        "promote",
+        help="通过统一学习治理入口升级 procedure -> habit 或 habit -> skill",
+    )
+    learning_promote.add_argument(
+        "--type",
+        dest="object_type",
+        required=True,
+        choices=["procedure", "habit"],
+    )
+    learning_promote.add_argument("object_id")
+    learning_promote.add_argument("--note")
+    learning_promote.add_argument(
+        "--require-confirmation",
+        action="store_true",
+        help="仅用于 --type procedure：允许高风险 habit，但后续匹配仍必须要求人工确认",
+    )
+    learning_promote.add_argument("--skill-name", help="仅用于 --type habit：目标 skill 名称")
+    learning_promote.add_argument("--version", help="仅用于 --type habit：目标 skill 版本")
+    learning_promote.add_argument("--approver", default="local_user")
+    learning_promote.add_argument("--rationale")
+    learning_promote.add_argument("--json", action="store_true")
+
+    learning_validate = learning_subparsers.add_parser(
+        "validate",
+        help="通过统一学习治理入口校验学习对象",
+    )
+    learning_validate.add_argument(
+        "--type",
+        dest="object_type",
+        required=True,
+        choices=["procedure", "habit", "skill"],
+    )
+    learning_validate.add_argument("object_id")
+    learning_validate.add_argument("--version")
+    learning_validate.add_argument("--reviewer", default="local_user")
+    learning_validate.add_argument("--note")
+    learning_validate.add_argument("--evidence-ref", action="append", default=[])
+    learning_validate.add_argument("--json", action="store_true")
+
+    learning_disable = learning_subparsers.add_parser(
+        "disable",
+        help="通过统一学习治理入口禁用 procedure / habit / skill",
+    )
+    learning_disable.add_argument(
+        "--type",
+        dest="object_type",
+        required=True,
+        choices=["procedure", "habit", "skill"],
+    )
+    learning_disable.add_argument("object_id")
+    learning_disable.add_argument("--note")
+    learning_disable.add_argument("--json", action="store_true")
+
+    learning_enable = learning_subparsers.add_parser(
+        "enable",
+        help="通过统一学习治理入口恢复已禁用的 procedure / habit / skill",
+    )
+    learning_enable.add_argument(
+        "--type",
+        dest="object_type",
+        required=True,
+        choices=["procedure", "habit", "skill"],
+    )
+    learning_enable.add_argument("object_id")
+    learning_enable.add_argument("--note")
+    learning_enable.add_argument("--json", action="store_true")
+
+    learning_rollback = learning_subparsers.add_parser(
+        "rollback",
+        help="通过统一学习治理入口回滚 skill 到归档版本",
+    )
+    learning_rollback.add_argument(
+        "--type",
+        dest="object_type",
+        required=True,
+        choices=["skill"],
+    )
+    learning_rollback.add_argument("object_id")
+    learning_rollback.add_argument("--to-version")
+    learning_rollback.add_argument("--json", action="store_true")
+
+    learning_approve = learning_subparsers.add_parser(
+        "approve",
+        help="通过统一学习治理入口审批 procedure / habit / skill",
+    )
+    learning_approve.add_argument(
+        "--type",
+        dest="object_type",
+        required=True,
+        choices=["procedure", "habit", "skill"],
+    )
+    learning_approve.add_argument("object_id")
+    learning_approve.add_argument("--reviewer", default="local_user")
+    learning_approve.add_argument("--note")
+    learning_approve.add_argument("--evidence-ref", action="append", default=[])
+    learning_approve.add_argument("--version")
+    learning_approve.add_argument("--json", action="store_true")
+
+    learning_reject = learning_subparsers.add_parser(
+        "reject",
+        help="通过统一学习治理入口拒绝 procedure / habit / skill",
+    )
+    learning_reject.add_argument(
+        "--type",
+        dest="object_type",
+        required=True,
+        choices=["procedure", "habit", "skill"],
+    )
+    learning_reject.add_argument("object_id")
+    learning_reject.add_argument("--reviewer", default="local_user")
+    learning_reject.add_argument("--note")
+    learning_reject.add_argument("--evidence-ref", action="append", default=[])
+    learning_reject.add_argument("--version")
+    learning_reject.add_argument("--json", action="store_true")
+
+    learning_request_changes = learning_subparsers.add_parser(
+        "request-changes",
+        help="通过统一学习治理入口要求 procedure / habit 修改后复审",
+    )
+    learning_request_changes.add_argument(
+        "--type",
+        dest="object_type",
+        required=True,
+        choices=["procedure", "habit"],
+    )
+    learning_request_changes.add_argument("object_id")
+    learning_request_changes.add_argument("--reviewer", default="local_user")
+    learning_request_changes.add_argument("--note")
+    learning_request_changes.add_argument("--evidence-ref", action="append", default=[])
+    learning_request_changes.add_argument("--json", action="store_true")
+
     llm_parser = subparsers.add_parser("llm", help="检查 LLM provider")
     llm_subparsers = llm_parser.add_subparsers(dest="llm_command", required=True)
 
@@ -416,6 +894,17 @@ def build_parser() -> argparse.ArgumentParser:
     skill_generate.add_argument("--task-id")
     skill_generate.add_argument("--node-id")
     skill_generate.add_argument("--json", action="store_true")
+
+    skill_promote_habit = skill_subparsers.add_parser(
+        "promote-habit",
+        help="将稳定 habit 提升为可验证 Skill",
+    )
+    skill_promote_habit.add_argument("procedure_id")
+    skill_promote_habit.add_argument("--skill-name")
+    skill_promote_habit.add_argument("--version")
+    skill_promote_habit.add_argument("--approver", default="local_user")
+    skill_promote_habit.add_argument("--rationale")
+    skill_promote_habit.add_argument("--json", action="store_true")
 
     skill_validate = skill_subparsers.add_parser("validate", help="校验 draft Skill")
     skill_validate.add_argument("skill_name")
@@ -566,6 +1055,428 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "chat" and args.chat_command == "repl":
         return _run_chat_repl(gateway, args, sys.stdout)
 
+    if args.command == "state" and args.state_command == "show":
+        payload = gateway.show_agent_state(section=args.section)
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_agent_state_payload(payload, sys.stdout)
+        return 0
+
+    if args.command == "procedure" and args.procedure_command == "list":
+        payload = gateway.list_procedures(include_disabled=args.include_disabled)
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            for item in payload:
+                print(
+                    f"{item.get('procedure_id')}\t{item.get('status')}\t"
+                    f"risk={item.get('risk_level')}\tconf={item.get('confidence')}\t"
+                    f"{item.get('name')}"
+                )
+        return 0
+
+    if args.command == "procedure" and args.procedure_command == "show":
+        payload = gateway.show_procedure(args.procedure_id)
+        if not payload:
+            print(f"procedure not found: {args.procedure_id}", file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_procedure_payload(payload, sys.stdout)
+        return 0
+
+    if args.command == "procedure" and args.procedure_command == "disable":
+        try:
+            payload = gateway.disable_procedure(args.procedure_id, note=args.note)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_procedure_payload(payload, sys.stdout)
+        return 0
+
+    if args.command == "procedure" and args.procedure_command == "edit":
+        try:
+            payload = gateway.edit_procedure(
+                args.procedure_id,
+                patch=_parse_payload(args.patch),
+                note=args.note,
+                reviewer=args.reviewer,
+            )
+        except (ValueError, json.JSONDecodeError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_procedure_payload(payload, sys.stdout)
+        return 0
+
+    if args.command == "procedure" and args.procedure_command == "review":
+        try:
+            payload = gateway.review_procedure(
+                args.procedure_id,
+                decision=args.decision,
+                reviewer=args.reviewer,
+                note=args.note,
+                evidence_refs=args.evidence_ref,
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_procedure_payload(payload, sys.stdout)
+        return 0
+
+    if args.command == "procedure" and args.procedure_command == "promote-habit":
+        try:
+            payload = gateway.promote_procedure_to_habit(
+                args.procedure_id,
+                note=args.note,
+                require_confirmation=args.require_confirmation,
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_procedure_payload(payload, sys.stdout)
+        return 0
+
+    if args.command == "procedure" and args.procedure_command == "explain-match":
+        task_or_goal = args.task_or_goal
+        task_payload = gateway.show_task(task_or_goal)
+        goal = task_payload["task"].goal if task_payload else task_or_goal
+        payload = gateway.explain_procedure_match(goal)
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_procedure_match(payload, sys.stdout)
+        return 0
+
+    if args.command == "learning" and args.learning_command == "review":
+        try:
+            payload = gateway.review_learning(
+                object_type=args.object_type,
+                status=args.status,
+                include_disabled=args.include_disabled,
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_learning_review(payload, sys.stdout)
+        return 0
+
+    if args.command == "learning" and args.learning_command == "show":
+        try:
+            payload = gateway.show_learning_object(
+                object_type=args.object_type,
+                object_id=args.object_id,
+                include_disabled=args.include_disabled,
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if not payload:
+            print(
+                f"learning object not found: {args.object_type}:{args.object_id}",
+                file=sys.stderr,
+            )
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_learning_object(payload, sys.stdout)
+        return 0
+
+    if args.command == "learning" and args.learning_command == "history":
+        try:
+            payload = gateway.history_learning_object(
+                object_type=args.object_type,
+                object_id=args.object_id,
+                include_disabled=args.include_disabled,
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if not payload:
+            print(
+                f"learning object not found: {args.object_type}:{args.object_id}",
+                file=sys.stderr,
+            )
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_learning_history(payload, sys.stdout)
+        return 0
+
+    if args.command == "learning" and args.learning_command == "explain-match":
+        task_or_goal = args.task_or_goal
+        task_payload = gateway.show_task(task_or_goal)
+        goal = task_payload["task"].goal if task_payload else task_or_goal
+        payload = gateway.explain_learning_match(goal)
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_learning_match(payload, sys.stdout)
+        return 0
+
+    if args.command == "learning" and args.learning_command == "edit":
+        try:
+            payload = gateway.edit_learning_object(
+                object_type=args.object_type,
+                object_id=args.object_id,
+                patch=_parse_payload(args.patch),
+                note=args.note,
+                reviewer=args.reviewer,
+            )
+        except (ValueError, json.JSONDecodeError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if not payload:
+            print(
+                f"learning object not found: {args.object_type}:{args.object_id}",
+                file=sys.stderr,
+            )
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_learning_object(payload, sys.stdout)
+        return 0
+
+    if args.command == "learning" and args.learning_command == "decay":
+        try:
+            payload = gateway.decay_learning_object(
+                object_type=args.object_type,
+                object_id=args.object_id,
+                note=args.note,
+                reviewer=args.reviewer,
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if not payload:
+            print(
+                f"learning object not found: {args.object_type}:{args.object_id}",
+                file=sys.stderr,
+            )
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_learning_object(payload, sys.stdout)
+        return 0
+
+    if args.command == "learning" and args.learning_command == "promote":
+        try:
+            payload = gateway.promote_learning_object(
+                object_type=args.object_type,
+                object_id=args.object_id,
+                note=args.note,
+                require_confirmation=args.require_confirmation,
+                skill_name=args.skill_name,
+                version=args.version,
+                approver=args.approver,
+                rationale=args.rationale,
+            )
+        except (ValueError, OmniAgentError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if not payload:
+            print(
+                f"learning object not found: {args.object_type}:{args.object_id}",
+                file=sys.stderr,
+            )
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_learning_object(payload, sys.stdout)
+        validation_report = payload.get("validation_report")
+        if validation_report is not None and not validation_report.passed:
+            return 1
+        return 0
+
+    if args.command == "learning" and args.learning_command == "validate":
+        try:
+            payload = gateway.validate_learning_object(
+                object_type=args.object_type,
+                object_id=args.object_id,
+                version=args.version,
+                reviewer=args.reviewer,
+                note=args.note,
+                evidence_refs=args.evidence_ref,
+            )
+        except (ValueError, OmniAgentError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if not payload:
+            print(
+                f"learning object not found: {args.object_type}:{args.object_id}",
+                file=sys.stderr,
+            )
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_learning_object(payload, sys.stdout)
+        validation_report = payload.get("validation_report")
+        if validation_report is not None and not validation_report.passed:
+            return 1
+        return 0
+
+    if args.command == "learning" and args.learning_command == "disable":
+        try:
+            payload = gateway.disable_learning_object(
+                object_type=args.object_type,
+                object_id=args.object_id,
+                note=args.note,
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if not payload:
+            print(
+                f"learning object not found: {args.object_type}:{args.object_id}",
+                file=sys.stderr,
+            )
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_learning_object(payload, sys.stdout)
+        return 0
+
+    if args.command == "learning" and args.learning_command == "enable":
+        try:
+            payload = gateway.enable_learning_object(
+                object_type=args.object_type,
+                object_id=args.object_id,
+                note=args.note,
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if not payload:
+            print(
+                f"learning object not found: {args.object_type}:{args.object_id}",
+                file=sys.stderr,
+            )
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_learning_object(payload, sys.stdout)
+        return 0
+
+    if args.command == "learning" and args.learning_command == "rollback":
+        try:
+            payload = gateway.rollback_learning_object(
+                object_type=args.object_type,
+                object_id=args.object_id,
+                to_version=args.to_version,
+            )
+        except (ValueError, OmniAgentError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if not payload:
+            print(
+                f"learning object not found: {args.object_type}:{args.object_id}",
+                file=sys.stderr,
+            )
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_learning_object(payload, sys.stdout)
+        return 0
+
+    if args.command == "learning" and args.learning_command == "approve":
+        try:
+            payload = gateway.approve_learning_object(
+                object_type=args.object_type,
+                object_id=args.object_id,
+                reviewer=args.reviewer,
+                note=args.note,
+                evidence_refs=args.evidence_ref,
+                version=args.version,
+            )
+        except (ValueError, OmniAgentError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if not payload:
+            print(
+                f"learning object not found: {args.object_type}:{args.object_id}",
+                file=sys.stderr,
+            )
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_learning_object(payload, sys.stdout)
+        return 0
+
+    if args.command == "learning" and args.learning_command == "reject":
+        try:
+            payload = gateway.reject_learning_object(
+                object_type=args.object_type,
+                object_id=args.object_id,
+                reviewer=args.reviewer,
+                note=args.note,
+                evidence_refs=args.evidence_ref,
+                version=args.version,
+            )
+        except (ValueError, OmniAgentError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if not payload:
+            print(
+                f"learning object not found: {args.object_type}:{args.object_id}",
+                file=sys.stderr,
+            )
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_learning_object(payload, sys.stdout)
+        return 0
+
+    if args.command == "learning" and args.learning_command == "request-changes":
+        try:
+            payload = gateway.request_changes_learning_object(
+                object_type=args.object_type,
+                object_id=args.object_id,
+                reviewer=args.reviewer,
+                note=args.note,
+                evidence_refs=args.evidence_ref,
+            )
+        except (ValueError, OmniAgentError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if not payload:
+            print(
+                f"learning object not found: {args.object_type}:{args.object_id}",
+                file=sys.stderr,
+            )
+            return 1
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            _print_learning_object(payload, sys.stdout)
+        return 0
+
     if args.command == "llm" and args.llm_command == "check":
         payload = gateway.check_llm()
         if args.json:
@@ -662,6 +1573,14 @@ def main(argv: list[str] | None = None) -> int:
             print("registrations:")
             for record in payload.get("registration_records", []):
                 print(f"- {record.action} {record.version} [{record.status}]")
+            lineage_records = payload.get("lineage_records") or []
+            if lineage_records:
+                print("lineage:")
+                for item in lineage_records:
+                    print(
+                        f"- habit={item.get('habit_id')} "
+                        f"experiences={','.join(item.get('source_experience_ids', []))}"
+                    )
         return 0
 
     if args.command == "skill" and args.skill_command == "import":
@@ -698,6 +1617,30 @@ def main(argv: list[str] | None = None) -> int:
             if report_path:
                 print(f"generation_report: {report_path}")
         return 0
+
+    if args.command == "skill" and args.skill_command == "promote-habit":
+        payload = gateway.promote_habit_to_skill(
+            args.procedure_id,
+            skill_name=args.skill_name,
+            version=args.version,
+            approver=args.approver,
+            rationale=args.rationale,
+        )
+        if args.json:
+            print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
+        else:
+            print(f"procedure_id: {payload['procedure_id']}")
+            print(f"skill_name: {payload['skill_name']}")
+            print(f"version: {payload['version']}")
+            print(f"lineage_path: {payload['lineage_path']}")
+            print(f"validation_passed: {payload['validation_report'].passed}")
+            approval = payload.get("approval_record")
+            if approval is not None:
+                print(f"approval_status: {approval.status}")
+            registration = payload.get("registration_record")
+            if registration is not None:
+                print(f"registration_status: {registration.status}")
+        return 0 if payload["validation_report"].passed else 1
 
     if args.command == "skill" and args.skill_command == "validate":
         payload = gateway.validate_skill(args.skill_name, version=args.version)

@@ -130,6 +130,8 @@ class Planner:
         skill_registry_entries: list[dict[str, Any]],
         conversation_history: list[dict[str, Any]] | None = None,
         bootstrap_documents: dict[str, Any] | None = None,
+        agent_state_summary: dict[str, Any] | None = None,
+        procedure_match: dict[str, Any] | None = None,
         recent_task_artifacts: list[dict[str, Any]] | None = None,
     ) -> tuple[PlanResult, Any]:
         direct_plan = self._direct_explicit_file_payload_plan(task_request)
@@ -250,6 +252,8 @@ class Planner:
             recall_explanations=recall_explanations,
             skill_registry_entries=skill_registry_entries,
             conversation_history=conversation_history,
+            agent_state_summary=agent_state_summary,
+            procedure_match=procedure_match,
             recent_task_artifacts=recent_task_artifacts,
         )
         response = self.llm.generate_structured(
@@ -303,6 +307,8 @@ class Planner:
         recall_explanations: list[dict[str, Any]],
         skill_registry_entries: list[dict[str, Any]],
         conversation_history: list[dict[str, Any]] | None = None,
+        agent_state_summary: dict[str, Any] | None = None,
+        procedure_match: dict[str, Any] | None = None,
         recent_task_artifacts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         skill_context = build_planner_skill_context(
@@ -314,6 +320,8 @@ class Planner:
         return {
             "task_request": self._serialize_task_request(task_request),
             "bootstrap_documents": bootstrap_documents,
+            "agent_state_summary": dict(agent_state_summary or {}),
+            "procedure_match": dict(procedure_match or {}),
             "conversation_history": list(conversation_history or []),
             # META-008: metadata-only manifest of prior task artifacts in
             # this thread so the Planner can decide whether to pull them.

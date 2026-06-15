@@ -242,8 +242,8 @@ class OmniAgentPhaseTwoIntegrationTest(unittest.TestCase):
         self.assertEqual(promote_exit, 0, promote_output)
         self.assertIn("promotion_source: user_confirmed", promote_output)
         self.assertIn("promotion_confirmed_by: tester", promote_output)
-        self.assertIn("solidification_result: generated_skill_created", promote_output)
-        self.assertIn("generated_skill_status: active", promote_output)
+        self.assertIn("solidification_result: blocked_requires_habit", promote_output)
+        self.assertNotIn("generated_skill_status: active", promote_output)
 
         gateway = self._build_gateway()
         payload = gateway.show_task(task_id)
@@ -251,7 +251,7 @@ class OmniAgentPhaseTwoIntegrationTest(unittest.TestCase):
         self.assertEqual(candidate["promotion_source"], "user_confirmed")
         self.assertTrue(candidate["promotion_confirmed"])
         self.assertEqual(candidate["promotion_confirmed_by"], "tester")
-        self.assertEqual(candidate["solidification_result"], "generated_skill_created")
+        self.assertEqual(candidate["solidification_result"], "blocked_requires_habit")
 
     def test_python_workspace_sandbox_blocks_external_commands_but_process_skill_can_run(
         self,

@@ -21,13 +21,13 @@
 
 `REAL-EVAL-005` 已把真实评测推进到第二批场景，覆盖错误恢复、复杂多轮、规划合理性和产物质量。但继续测试更复杂场景前，当前评测体系还有三个关键短板：
 
-1. **模型能力与 Agent 能力没有清晰切分**  
+1. **模型能力与 Agent 能力没有清晰切分**
    有些失败可能是模型在已获得充分上下文、工具结果和 schema 后仍无法完成推理；这类问题不应被误判为 Agent 架构缺陷，也不应通过局部 patch 掩盖。
 
-2. **任务级 critic 不是明确的任务完成度评估节点**  
+2. **任务级 critic 不是明确的任务完成度评估节点**
    当前已有 node-level / task-level `CriticVerdict`，但它主要服务于 retry / degrade / replan / fail 决策。复杂评测需要一个独立 completion evaluation，判断最终结果是否真正满足用户目标，并给出可审计的失败归因。
 
-3. **向量召回已支持真实 embedding，但评测诊断仍需升级**  
+3. **向量召回已支持真实 embedding，但评测诊断仍需升级**
    `embeddings.py` 已接入 OpenAI-compatible `/embeddings` 与进程内 `local_model` ONNX provider，默认仍使用本地 hash fallback。复杂跨任务记忆、语义召回和模糊引用测试还需要在 diagnostics 中明确展示 provider/model/dimensions/fingerprint/fallback 与召回证据，否则仍可能把召回问题误混为 Planner 或模型问题。
 
 因此下一批复杂场景不应直接扩充，而应先补齐评测与召回基础能力。

@@ -281,13 +281,14 @@ class PhaseThreeAcceptanceTest(unittest.TestCase):
             rationale="将稳定 workflow 固化为可复用能力",
         )
         self.assertEqual(promotion["candidate"]["promotion_source"], "user_confirmed")
-        self.assertEqual(promotion["candidate"]["solidification_result"], "generated_skill_created")
+        self.assertEqual(promotion["candidate"]["solidification_result"], "blocked_requires_habit")
+        self.assertIsNone(promotion["generated_skill"])
 
         skill_payload = gateway.show_skill(candidate["skill_name"])
-        self.assertEqual(skill_payload["registry_entry"].lifecycle_status.value, "active")
-        self.assertTrue(skill_payload["validation_reports"][0].passed)
-        self.assertIn(skill_payload["approval_records"][0].status, {"approved", "not_required"})
-        self.assertEqual(skill_payload["registration_records"][0].status, "active")
+        self.assertEqual(skill_payload["registry_entry"].lifecycle_status.value, "draft")
+        self.assertEqual(skill_payload["validation_reports"], [])
+        self.assertEqual(skill_payload["approval_records"], [])
+        self.assertEqual(skill_payload["registration_records"], [])
 
     def test_acceptance_controlled_skill_generation_gap_to_validation(self) -> None:
         gateway = self._build_gateway()
