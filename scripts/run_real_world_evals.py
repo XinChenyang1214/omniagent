@@ -586,6 +586,7 @@ def _collect_evidence(
         "request_payload_stats": [],
         "llm_calls": [],
         "learning_feedbacks": [],
+        "learning_corrections": [],
     }
     used_skills: set[str] = set()
 
@@ -695,6 +696,14 @@ def _collect_evidence(
             if isinstance(feedback, dict):
                 evidence["learning_feedbacks"].append(
                     _summarize_learning_feedback(task_id, feedback)
+                )
+
+        correction_path = task_dir / "learning" / "correction.json"
+        if correction_path.exists():
+            correction = _load_json(correction_path)
+            if isinstance(correction, dict):
+                evidence["learning_corrections"].append(
+                    _summarize_learning_correction(task_id, correction)
                 )
 
         for call_path in sorted((task_dir / "llm_calls").glob("*.json")):
@@ -813,6 +822,26 @@ def _summarize_learning_feedback(task_id: str, payload: dict[str, Any]) -> dict[
         "review_target_type": review.get("target_type"),
         "review_target_id": review.get("target_id"),
         "summary_line_count": len(payload.get("summary_lines") or []),
+    }
+
+
+def _summarize_learning_correction(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "task_id": task_id,
+        "schema_version": payload.get("schema_version"),
+        "experience_id": payload.get("experience_id"),
+        "procedure_id": payload.get("procedure_id"),
+        "object_type": payload.get("object_type"),
+        "trigger": payload.get("trigger"),
+        "previous_status": payload.get("previous_status"),
+        "new_status": payload.get("new_status"),
+        "previous_review_status": payload.get("previous_review_status"),
+        "new_review_status": payload.get("new_review_status"),
+        "failure_count": payload.get("failure_count"),
+        "frozen": payload.get("frozen"),
+        "evidence_refs": _string_values(payload.get("evidence_refs")),
+        "reason": payload.get("reason"),
+        "next_action_count": len(payload.get("next_actions") or []),
     }
 
 
@@ -1407,6 +1436,43 @@ def _write_case_diagnostics(
         )
         lines.append("")
 
+    if evidence.get("learning_corrections"):
+        lines.extend(["## Learning Correction", ""])
+        lines.extend(
+            _markdown_table(
+                [
+                    "Task",
+                    "Schema",
+                    "Procedure",
+                    "Type",
+                    "Trigger",
+                    "Previous",
+                    "New",
+                    "Review",
+                    "Failures",
+                    "Frozen",
+                    "Reason",
+                ],
+                [
+                    [
+                        item.get("task_id"),
+                        item.get("schema_version"),
+                        item.get("procedure_id"),
+                        item.get("object_type"),
+                        item.get("trigger"),
+                        item.get("previous_status"),
+                        item.get("new_status"),
+                        item.get("new_review_status"),
+                        item.get("failure_count"),
+                        item.get("frozen"),
+                        _short_text(item.get("reason"), 120),
+                    ]
+                    for item in evidence.get("learning_corrections", [])
+                ],
+            )
+        )
+        lines.append("")
+
     embedding_summary = (
         evidence.get("embedding_summary")
         if isinstance(evidence.get("embedding_summary"), dict)
@@ -1663,6 +1729,14 @@ def _evaluate_assertions(
         issues.append(
             f"too few successful task turns: {sum(1 for item in successes if item)} "
             f"< {min_successful_turns}"
+        )
+    min_failed_turns = assertions.get("min_failed_turns")
+    if min_failed_turns is not None and sum(1 for item in successes if not item) < int(
+        min_failed_turns
+    ):
+        issues.append(
+            f"too few failed task turns: {sum(1 for item in successes if not item)} "
+            f"< {min_failed_turns}"
         )
 
     assistant_messages = _assistant_messages(executions)
@@ -1935,6 +2009,90 @@ def _evaluate_assertions(
         observed=feedback_fast_path_decisions,
         issues=issues,
     )
+
+    learning_corrections = [
+        item for item in evidence.get("learning_corrections", []) if isinstance(item, dict)
+    ]
+    correction_triggers = [
+        str(item.get("trigger")) for item in learning_corrections if item.get("trigger") is not None
+    ]
+    _assert_required_any(
+        label="learning correction trigger",
+        expected={
+            str(item) for item in assertions.get("required_learning_correction_trigger_any", [])
+        },
+        observed=correction_triggers,
+        issues=issues,
+    )
+    _assert_required_all(
+        label="learning correction triggers",
+        expected={
+            str(item) for item in assertions.get("required_learning_correction_trigger_all", [])
+        },
+        observed=correction_triggers,
+        issues=issues,
+    )
+    correction_statuses = [
+        str(item.get("new_status"))
+        for item in learning_corrections
+        if item.get("new_status") is not None
+    ]
+    _assert_required_any(
+        label="learning correction new status",
+        expected={
+            str(item) for item in assertions.get("required_learning_correction_new_status_any", [])
+        },
+        observed=correction_statuses,
+        issues=issues,
+    )
+    _assert_required_all(
+        label="learning correction new statuses",
+        expected={
+            str(item) for item in assertions.get("required_learning_correction_new_status_all", [])
+        },
+        observed=correction_statuses,
+        issues=issues,
+    )
+    correction_review_statuses = [
+        str(item.get("new_review_status"))
+        for item in learning_corrections
+        if item.get("new_review_status") is not None
+    ]
+    _assert_required_any(
+        label="learning correction review status",
+        expected={
+            str(item)
+            for item in assertions.get("required_learning_correction_review_status_any", [])
+        },
+        observed=correction_review_statuses,
+        issues=issues,
+    )
+    _assert_required_all(
+        label="learning correction review statuses",
+        expected={
+            str(item)
+            for item in assertions.get("required_learning_correction_review_status_all", [])
+        },
+        observed=correction_review_statuses,
+        issues=issues,
+    )
+    correction_object_types = [
+        str(item.get("object_type"))
+        for item in learning_corrections
+        if item.get("object_type") is not None
+    ]
+    _assert_required_any(
+        label="learning correction object type",
+        expected={
+            str(item) for item in assertions.get("required_learning_correction_object_type_any", [])
+        },
+        observed=correction_object_types,
+        issues=issues,
+    )
+    if assertions.get("require_learning_correction_frozen") and not any(
+        item.get("frozen") is True for item in learning_corrections
+    ):
+        issues.append("learning correction did not record a frozen object")
 
     _assert_required_any(
         label="procedure status",
@@ -2557,6 +2715,7 @@ def _read_learning_artifacts(
         "habit_fast_paths": [],
         "experience_records": [],
         "learning_feedbacks": [],
+        "learning_corrections": [],
         "procedure_memory_records": [],
         "skill_lineages": [],
         "skill_lifecycle_records": [],
@@ -2647,6 +2806,17 @@ def _read_learning_artifacts(
                 learning["learning_feedbacks"].append(summary)
             artifacts.append(
                 _artifact_record(feedback_path, run_dir=run_dir, kind="learning_feedback")
+            )
+
+        correction_path = task_dir / "learning" / "correction.json"
+        if correction_path.exists():
+            payload = _load_json(correction_path)
+            if isinstance(payload, dict):
+                summary = _summarize_learning_correction(task_id, payload)
+                summary["path"] = str(correction_path)
+                learning["learning_corrections"].append(summary)
+            artifacts.append(
+                _artifact_record(correction_path, run_dir=run_dir, kind="learning_correction")
             )
 
     procedures_root = workspace / "procedures"
@@ -2777,6 +2947,7 @@ def _summarize_result_for_index(
         "habit_fast_paths": [],
         "experience_records": [],
         "learning_feedbacks": [],
+        "learning_corrections": [],
         "procedure_memory_records": [],
         "skill_lineages": [],
         "skill_lifecycle_records": [],
@@ -2969,6 +3140,9 @@ def _learning_values(case: dict[str, Any], section: str, key: str) -> list[str]:
 
 def _procedure_ids(case: dict[str, Any]) -> list[str]:
     values = _learning_values(case, "procedure_matches", "procedure_id")
+    for value in _learning_values(case, "learning_corrections", "procedure_id"):
+        if value not in values:
+            values.append(value)
     learning = case.get("learning_evidence")
     if isinstance(learning, dict):
         records = learning.get("procedure_memory_records")
@@ -2992,6 +3166,17 @@ def _habit_ids(case: dict[str, Any]) -> list[str]:
     values = _learning_values(case, "habit_fast_paths", "habit_id")
     learning = case.get("learning_evidence")
     if isinstance(learning, dict):
+        corrections = learning.get("learning_corrections")
+        if isinstance(corrections, list):
+            for record in corrections:
+                if not isinstance(record, dict) or record.get("object_type") != "habit":
+                    continue
+                value = record.get("procedure_id")
+                if value is None:
+                    continue
+                text = str(value)
+                if text and text not in values:
+                    values.append(text)
         records = learning.get("procedure_memory_records")
         if isinstance(records, list):
             for record in records:
@@ -5108,12 +5293,16 @@ def _has_learning_governance_evidence(case: dict[str, Any]) -> bool:
     learning = case.get("learning_evidence")
     if not isinstance(learning, dict):
         return False
+    corrections = learning.get("learning_corrections")
+    if isinstance(corrections, list) and any(isinstance(item, dict) for item in corrections):
+        return True
     records = learning.get("procedure_memory_records")
     if not isinstance(records, list):
         records = []
     governance_review_statuses = {
         "edited",
         "edited_requires_review",
+        "correction_required",
         "decayed_requires_review",
         "needs_changes",
         "rejected",
@@ -5149,6 +5338,16 @@ def _has_learning_history_evidence(case: dict[str, Any]) -> bool:
     learning = case.get("learning_evidence")
     if not isinstance(learning, dict):
         return False
+
+    corrections = learning.get("learning_corrections")
+    if isinstance(corrections, list):
+        for record in corrections:
+            if isinstance(record, dict) and (
+                record.get("procedure_id")
+                or record.get("trigger")
+                or record.get("new_review_status")
+            ):
+                return True
 
     experience_records = learning.get("experience_records")
     if isinstance(experience_records, list):
@@ -5249,6 +5448,28 @@ def _has_learning_decay_evidence(case: dict[str, Any]) -> bool:
         if str(record.get("latest_audit_event") or "") == "decayed":
             return True
         if "decayed" in _string_values(record.get("audit_events")):
+            return True
+    return False
+
+
+def _has_learning_correction_evidence(case: dict[str, Any]) -> bool:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return False
+    corrections = learning.get("learning_corrections")
+    if isinstance(corrections, list) and any(isinstance(item, dict) for item in corrections):
+        return True
+    records = learning.get("procedure_memory_records")
+    if not isinstance(records, list):
+        return False
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("review_status") or "") == "correction_required":
+            return True
+        if "validator_failed" in _string_values(record.get("audit_events")):
+            return True
+        if str(record.get("latest_audit_event") or "") == "validator_failed":
             return True
     return False
 
@@ -5832,6 +6053,26 @@ def build_evidence_dashboard(
                 limit=limit,
             ),
         },
+        "learning_correction_cases": {
+            "title": "Learning Correction Cases",
+            "description": "集中查看 procedure / habit 复用失败后的纠错、冻结、复审和恢复证据，确认旧记忆不会继续自动复用。",
+            "query_command": _dashboard_query_command(
+                "evidence-learning-kind",
+                "learning_corrections",
+            ),
+            "query": _dashboard_filtered_query(
+                payload,
+                filters={
+                    "learning_correction": [
+                        "learning_corrections",
+                        "procedure_memory_records.correction_required",
+                        "procedure_memory_records.validator_failed",
+                    ]
+                },
+                predicate=_has_learning_correction_evidence,
+                limit=limit,
+            ),
+        },
         "learning_governance_cases": {
             "title": "Learning Governance Cases",
             "description": "集中查看 procedure / habit / skill 生命周期、review、disable、enable、deprecate 和 reactivate evidence，确认用户可治理的学习对象进入回归视图。",
@@ -6377,6 +6618,7 @@ def render_evidence_dashboard_markdown(payload: dict[str, Any]) -> str:
         "learning_match_explanation_cases",
         "learning_gate_cases",
         "learning_feedback_cases",
+        "learning_correction_cases",
         "learning_governance_cases",
         "learning_history_cases",
         "learning_approval_cases",
@@ -6708,7 +6950,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Filter evidence query by learning evidence kind "
             "(procedure_matches, habit_fast_paths, experience_records, learning_feedbacks, "
-            "procedure_memory_records, skill_lineages, skill_lifecycle_records)"
+            "learning_corrections, procedure_memory_records, skill_lineages, "
+            "skill_lifecycle_records)"
         ),
     )
     parser.add_argument(

@@ -149,6 +149,7 @@ def build_task_learning_feedback(
     experience: dict[str, Any] | None = None,
     procedure_match: dict[str, Any] | None = None,
     habit_fast_path: dict[str, Any] | None = None,
+    correction: dict[str, Any] | None = None,
     procedures: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build user-facing feedback from task learning artifacts.
@@ -159,6 +160,7 @@ def build_task_learning_feedback(
     experience = dict(experience or {})
     procedure_match = dict(procedure_match or {})
     habit_fast_path = dict(habit_fast_path or {})
+    correction = dict(correction or {})
     procedures = list(procedures or [])
     procedures_by_id = {
         str(procedure.get("procedure_id") or ""): procedure
@@ -199,6 +201,7 @@ def build_task_learning_feedback(
         habit_fast_path=habit_fast_path,
         matched_procedure=matched_procedure,
         generated_procedure=generated_procedure,
+        correction=correction,
     )
     review = _build_review_feedback(
         task_goal=task_goal,
@@ -206,6 +209,7 @@ def build_task_learning_feedback(
         generated_procedure=generated_procedure,
         matched_procedure=matched_procedure,
         learnable=learnable,
+        correction=correction,
     )
     summary_lines = _learning_feedback_summary_lines(
         experience=experience,
@@ -215,6 +219,7 @@ def build_task_learning_feedback(
         habit_fast_path=habit_fast_path,
         matched_procedure=matched_procedure,
         generated_procedure=generated_procedure,
+        correction=correction,
         reuse=reuse,
         review=review,
     )
@@ -268,6 +273,20 @@ def build_task_learning_feedback(
             "policy_gate": habit_fast_path.get("policy_gate") or {},
             "reason": habit_fast_path.get("reason"),
         },
+        "correction": {
+            "recorded": bool(correction),
+            "trigger": correction.get("trigger"),
+            "procedure_id": correction.get("procedure_id"),
+            "object_type": correction.get("object_type"),
+            "previous_status": correction.get("previous_status"),
+            "new_status": correction.get("new_status"),
+            "previous_review_status": correction.get("previous_review_status"),
+            "new_review_status": correction.get("new_review_status"),
+            "failure_count": correction.get("failure_count"),
+            "frozen": correction.get("frozen"),
+            "reason": correction.get("reason"),
+            "evidence_refs": list(correction.get("evidence_refs") or []),
+        },
         "reuse": reuse,
         "review": review,
         "summary_lines": summary_lines,
@@ -298,7 +317,18 @@ def _build_reuse_feedback(
     habit_fast_path: dict[str, Any],
     matched_procedure: dict[str, Any] | None,
     generated_procedure: dict[str, Any] | None,
+    correction: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if correction:
+        return {
+            "status": "correction_required",
+            "reusable_now": False,
+            "why": (
+                "本次复用失败，相关学习对象已进入纠错/复审状态："
+                f"{correction.get('reason') or '未记录原因'}"
+            ),
+            "next_time": "下一次类似任务不会自动复用该旧记忆，直到 fresh evidence 复审通过或被显式恢复。",
+        }
     policy_gate = (
         habit_fast_path.get("policy_gate") if isinstance(habit_fast_path.get("policy_gate"), dict) else {}
     )
@@ -385,6 +415,7 @@ def _build_review_feedback(
     generated_procedure: dict[str, Any] | None,
     matched_procedure: dict[str, Any] | None,
     learnable: bool,
+    correction: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     commands: list[str] = []
     if experience_id:
@@ -395,7 +426,14 @@ def _build_review_feedback(
     target_status = str((target or {}).get("status") or "")
     required = False
     reason = "无需立即处理；可以按需查看本次学习记录。"
-    if generated_procedure is not None:
+    if correction:
+        required = True
+        procedure_id = str(correction.get("procedure_id") or procedure_id)
+        correction_type = str(correction.get("object_type") or "procedure")
+        reason = "复用失败触发 learning correction；旧记忆已冻结自动复用，需要修正或带 fresh evidence 复审。"
+        commands.extend(str(item) for item in list(correction.get("next_actions") or []))
+        target_status = "habit" if correction_type == "habit" else "procedure"
+    elif generated_procedure is not None:
         required = True
         reason = "新 procedure draft 需要用户审核；审核前不会自动复用。"
         evidence_ref = _first_validator_evidence(generated_procedure)
@@ -447,6 +485,7 @@ def _learning_feedback_summary_lines(
     habit_fast_path: dict[str, Any],
     matched_procedure: dict[str, Any] | None,
     generated_procedure: dict[str, Any] | None,
+    correction: dict[str, Any],
     reuse: dict[str, Any],
     review: dict[str, Any],
 ) -> list[str]:
@@ -487,6 +526,13 @@ def _learning_feedback_summary_lines(
         )
     else:
         lines.append(f"复用判断：{reuse.get('why')} {reuse.get('next_time')}")
+    if correction:
+        lines.append(
+            "纠错："
+            f"{correction.get('previous_status')} -> {correction.get('new_status')}，"
+            f"review={correction.get('new_review_status')}，"
+            f"frozen={correction.get('frozen')}。"
+        )
     lines.append(f"需要你做：{review.get('reason')}")
     return lines
 
@@ -887,11 +933,21 @@ def _procedure_item(procedure: dict[str, Any]) -> dict[str, Any]:
             )
         )
         next_actions.append("Review the decayed learning object with fresh evidence.")
+    if review_status == "correction_required":
+        findings.append(
+            _finding(
+                "high",
+                "correction_required",
+                "Previous reuse failed; this learning object requires correction review before reuse.",
+            )
+        )
+        next_actions.append("Review failed evidence, then approve with fresh validation refs.")
     if status == "draft" and review_status in {
         "unreviewed",
         "edited",
         "edited_requires_review",
         "decayed_requires_review",
+        "correction_required",
         "needs_changes",
     }:
         findings.append(

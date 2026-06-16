@@ -17,7 +17,7 @@ OmniAgent 当前代码基础是一个以 task 为中心的本地嵌入式 Agent 
 - 轻量本地运行时：stdlib 核心 + 默认本地 embedding 推理依赖 + OpenAI 兼容 LLM
 - 默认离线运行，除 LLM 调用和显式授权网络任务外不访问外部网络
 
-当前代码层面已完成三阶段 MVP、P0 补丁轮、`BASECAP-001`、`BASECAP-002`、`REAL-EVAL-005`、`CAP-EVAL-001` 和 `META-009` 首轮落地结果；这些作为旧实现基础和迁移输入。现阶段主线切换为 `META-010` Agent usability and learning loop MVP：Phase 1 Agent state、Phase 2 Experience records、Phase 3 Procedure memory、Phase 4 Habit fast path、Phase 5 Skill promotion 和 Phase 6 Learning feedback 已实现并接入真实评测证据；下一步进入更深的 learning-loop 纠错、复审与治理增强。
+当前代码层面已完成三阶段 MVP、P0 补丁轮、`BASECAP-001`、`BASECAP-002`、`REAL-EVAL-005`、`CAP-EVAL-001` 和 `META-009` 首轮落地结果；这些作为旧实现基础和迁移输入。现阶段主线切换为 `META-010` Agent usability and learning loop MVP：Phase 1 Agent state、Phase 2 Experience records、Phase 3 Procedure memory、Phase 4 Habit fast path、Phase 5 Skill promotion、Phase 6 Learning feedback 和 Phase 7 Learning correction 已实现并接入真实评测证据；下一步进入更深的 learning-loop 治理增强和更广的稳定 habit / skill promotion 回归。
 
 ## 权威文档
 
@@ -31,13 +31,15 @@ OmniAgent 当前代码基础是一个以 task 为中心的本地嵌入式 Agent 
 6. `docs/specs/experience-record.md`：任务经验记录 schema、写入时机和 learning gate
 7. `docs/specs/procedure-memory.md`：procedure / habit 生命周期和升级规则
 8. `docs/specs/skill-promotion.md`：habit -> skill promotion gate、lineage、contract 和权限规则
-9. `ARCHITECTURE.md`：旧实现架构、模块职责、执行流程和迁移输入
-10. `ROADMAP.md`：路线图和当前优先级
-11. `issue.md`：未关闭问题与近期已关闭记录
-12. `REAL_WORLD_EVAL_PLAN.md`：真实场景自主评测闭环
-13. `CONFIGURATION.md`：配置项和环境变量参考
-14. `docs/archive/pre-product-redesign/`：重开发前旧阶段过程文档归档
-15. `CLAUDE.md`：其他 AI 编程助手的项目指南
+9. `docs/specs/learning-feedback.md`：任务结束学习反馈输出契约
+10. `docs/specs/learning-correction.md`：复用失败、降级冻结、解释、复审和恢复证据契约
+11. `ARCHITECTURE.md`：旧实现架构、模块职责、执行流程和迁移输入
+12. `ROADMAP.md`：路线图和当前优先级
+13. `issue.md`：未关闭问题与近期已关闭记录
+14. `REAL_WORLD_EVAL_PLAN.md`：真实场景自主评测闭环
+15. `CONFIGURATION.md`：配置项和环境变量参考
+16. `docs/archive/pre-product-redesign/`：重开发前旧阶段过程文档归档
+17. `CLAUDE.md`：其他 AI 编程助手的项目指南
 
 代码是当前实现事实来源；目标产品方向以 `docs/product-architecture.md` 和 `META-010` workstream 为准。文档与代码冲突时，应区分“旧实现事实”和“新目标契约”，不要把旧实现误当成新架构要求。
 
@@ -211,7 +213,7 @@ poetry run python -m pytest tests/
 poetry run ruff check src/ tests/ scripts/run_real_world_evals.py
 ```
 
-当前复杂场景评测已归档为旧实现回归集。`META-010` 期间真实场景评测应继续维护旧基线，同时新增 learning-loop evidence，验证 Agent state、ExperienceRecord、procedure / habit 命中、validation evidence、skill promotion lineage 和 learning feedback。运行后重点查看：
+当前复杂场景评测已归档为旧实现回归集。`META-010` 期间真实场景评测应继续维护旧基线，同时新增 learning-loop evidence，验证 Agent state、ExperienceRecord、procedure / habit 命中、validation evidence、skill promotion lineage、learning feedback 和 learning correction。运行后重点查看：
 
 - `eval_runs/<run_id>/summary.md`
 - `eval_runs/<run_id>/cases/<scenario_id>/result.json`

@@ -319,6 +319,9 @@ class TaskArtifactManager:
     def write_learning_feedback(self, task_dir: Path, feedback: dict[str, Any]) -> None:
         _write_json(task_dir / "learning" / "feedback.json", feedback)
 
+    def write_learning_correction(self, task_dir: Path, correction: dict[str, Any]) -> None:
+        _write_json(task_dir / "learning" / "correction.json", correction)
+
     def write_llm_call(
         self, task_dir: Path, response: LLMResponse, *, request_payload: dict[str, Any]
     ) -> None:

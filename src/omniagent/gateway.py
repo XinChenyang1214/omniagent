@@ -540,6 +540,7 @@ class RuntimeGateway:
             experience=load_json(task_dir / "experience" / "experience_record.json"),
             procedure_match=load_json(task_dir / "procedure" / "procedure_match.json"),
             habit_fast_path=load_json(task_dir / "procedure" / "habit_fast_path.json"),
+            correction=load_json(task_dir / "learning" / "correction.json"),
             procedures=self.procedure_memory.list(include_disabled=True),
         )
         report.learning_feedback = feedback

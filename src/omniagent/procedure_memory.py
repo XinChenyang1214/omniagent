@@ -27,8 +27,12 @@ PROCEDURE_EDITABLE_FIELDS = {
 }
 PROCEDURE_REVIEW_DECISIONS = ("approved", "needs_changes", "rejected")
 PROCEDURE_REVIEW_STATUSES_REQUIRING_EVIDENCE = {
+    "correction_required",
     "edited_requires_review",
     "decayed_requires_review",
+}
+PROCEDURE_REVIEW_BLOCKING_STATUSES = PROCEDURE_REVIEW_STATUSES_REQUIRING_EVIDENCE | {
+    "needs_changes",
 }
 
 
@@ -464,6 +468,9 @@ class ProcedureMemoryStore:
         procedure["reviewed_by"] = reviewer
 
         if decision == "approved":
+            if old_review_status == "correction_required":
+                procedure["failure_count"] = 0
+                procedure["confidence"] = max(float(procedure.get("confidence", 0.0)), 0.55)
             if old_status == "draft":
                 self.save(procedure)
                 return self.promote_to_verified(
@@ -626,6 +633,9 @@ class ProcedureMemoryStore:
             procedure["status"] = "verified"
         elif old_status == "verified":
             procedure["status"] = "draft"
+        procedure["review_status"] = (
+            "disabled" if procedure.get("status") == "disabled" else "correction_required"
+        )
         procedure["confidence"] = max(0.0, float(procedure.get("confidence", 0.0)) - 0.2)
         procedure.setdefault("audit_notes", []).append(
             {
@@ -658,6 +668,23 @@ class ProcedureMemoryStore:
                         "procedure_id": procedure.get("procedure_id"),
                         "status": status,
                         "reason": f"procedure is {status}",
+                    }
+                )
+                continue
+            review_status = str(procedure.get("review_status") or "")
+            failure_count = int(procedure.get("failure_count", 0) or 0)
+            if review_status in PROCEDURE_REVIEW_BLOCKING_STATUSES or failure_count > 0:
+                rejected.append(
+                    {
+                        "procedure_id": procedure.get("procedure_id"),
+                        "status": status,
+                        "review_status": review_status or None,
+                        "failure_count": failure_count,
+                        "reason": (
+                            "procedure requires correction review before reuse"
+                            if review_status == "correction_required"
+                            else "procedure requires review before reuse"
+                        ),
                     }
                 )
                 continue

@@ -322,6 +322,51 @@ def test_assertions_check_full_assistant_messages(tmp_path: Path) -> None:
     assert diagnosis == "passed"
 
 
+def test_assertions_check_learning_correction_evidence(tmp_path: Path) -> None:
+    executions = [
+        {"json": {"result": {"success": True}}, "timed_out": False},
+        {"json": {"result": {"success": False}}, "timed_out": False},
+    ]
+    evidence = {
+        "turns": [],
+        "used_skills": [],
+        "permissions": [],
+        "node_statuses": [],
+        "llm_calls": [],
+        "learning_corrections": [
+            {
+                "procedure_id": "proc_1",
+                "object_type": "procedure",
+                "trigger": "validator_failure",
+                "new_status": "draft",
+                "new_review_status": "correction_required",
+                "frozen": True,
+            }
+        ],
+    }
+
+    passed, issues, diagnosis = evals._evaluate_assertions(
+        scenario={
+            "assertions": {
+                "min_successful_turns": 1,
+                "min_failed_turns": 1,
+                "required_learning_correction_trigger_any": ["validator_failure"],
+                "required_learning_correction_new_status_any": ["draft"],
+                "required_learning_correction_review_status_any": ["correction_required"],
+                "required_learning_correction_object_type_any": ["procedure"],
+                "require_learning_correction_frozen": True,
+            }
+        },
+        workspace=tmp_path,
+        executions=executions,
+        evidence=evidence,
+    )
+
+    assert passed is True
+    assert issues == []
+    assert diagnosis == "passed"
+
+
 def test_collect_evidence_reads_completion_and_embedding_artifacts(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     task_dir = workspace / "tasks" / "task_123"
@@ -654,6 +699,28 @@ def test_evidence_index_summarizes_runs_and_learning_artifacts(tmp_path: Path) -
         ),
         encoding="utf-8",
     )
+    (task_dir / "learning" / "correction.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "learning-correction/v1",
+                "task_id": task_id,
+                "experience_id": "exp_2",
+                "procedure_id": "proc_1",
+                "object_type": "procedure",
+                "trigger": "validator_failure",
+                "previous_status": "verified",
+                "new_status": "draft",
+                "previous_review_status": "approved",
+                "new_review_status": "correction_required",
+                "failure_count": 1,
+                "frozen": True,
+                "evidence_refs": ["tasks/task_123/completion/evaluation.json"],
+                "reason": "validator failed",
+                "next_actions": ["omniagent learning approve --type procedure proc_1"],
+            }
+        ),
+        encoding="utf-8",
+    )
     (workspace / "skills" / "managed" / "generated.habit.demo" / "lineage.json").write_text(
         json.dumps(
             {
@@ -847,6 +914,12 @@ def test_evidence_index_summarizes_runs_and_learning_artifacts(tmp_path: Path) -
     assert feedback["schema_version"] == "learning-feedback/v1"
     assert feedback["reuse_status"] == "habit_fast_path"
     assert feedback["review_target_type"] == "habit"
+    correction = case["learning_evidence"]["learning_corrections"][0]
+    assert correction["schema_version"] == "learning-correction/v1"
+    assert correction["procedure_id"] == "proc_1"
+    assert correction["trigger"] == "validator_failure"
+    assert correction["new_review_status"] == "correction_required"
+    assert correction["frozen"] is True
     assert case["learning_evidence"]["procedure_memory_records"][0]["procedure_id"] == "proc_1"
     assert case["learning_evidence"]["procedure_memory_records"][0]["object_type"] == "habit"
     assert case["learning_evidence"]["procedure_memory_records"][0]["status"] == "disabled"
@@ -983,6 +1056,20 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
                             "schema_version": "learning-feedback/v1",
                             "reuse_status": "habit_fast_path",
                             "review_target_type": "habit",
+                        }
+                    ],
+                    "learning_corrections": [
+                        {
+                            "task_id": "task_1",
+                            "schema_version": "learning-correction/v1",
+                            "procedure_id": "proc_1",
+                            "object_type": "procedure",
+                            "trigger": "validator_failure",
+                            "previous_status": "verified",
+                            "new_status": "draft",
+                            "new_review_status": "correction_required",
+                            "failure_count": 1,
+                            "frozen": True,
                         }
                     ],
                     "procedure_memory_records": [
@@ -1260,6 +1347,7 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
     assert query["summary"]["by_permission"] == {"filesystem.write:granted": 1}
     assert query["summary"]["by_learning_kind"] == {
         "habit_fast_paths": 1,
+        "learning_corrections": 1,
         "learning_feedbacks": 1,
         "procedure_matches": 1,
         "procedure_memory_records": 1,
@@ -1373,6 +1461,7 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
             "embedding_incompatible_match_count": 0,
             "learning_evidence_kinds": [
                 "habit_fast_paths",
+                "learning_corrections",
                 "learning_feedbacks",
                 "procedure_matches",
                 "procedure_memory_records",
@@ -1383,7 +1472,7 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
             "thread_ids": [],
             "completion_failure_layers": ["none"],
             "model_capability_suspected": False,
-            "learning_evidence_count": 6,
+            "learning_evidence_count": 7,
             "diagnostics_path": "/tmp/eval_runs/run_a/cases/learning_loop_case/diagnostics.md",
             "result_path": None,
         }
@@ -1580,6 +1669,20 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
                             "schema_version": "learning-feedback/v1",
                             "reuse_status": "habit_fast_path",
                             "review_target_type": "habit",
+                        }
+                    ],
+                    "learning_corrections": [
+                        {
+                            "task_id": "task_1",
+                            "schema_version": "learning-correction/v1",
+                            "procedure_id": "proc_1",
+                            "object_type": "procedure",
+                            "trigger": "validator_failure",
+                            "previous_status": "verified",
+                            "new_status": "draft",
+                            "new_review_status": "correction_required",
+                            "failure_count": 1,
+                            "frozen": True,
                         }
                     ],
                     "procedure_memory_records": [
@@ -2047,6 +2150,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert dashboard["summary"]["by_learning_kind"] == {
         "experience_records": 1,
         "habit_fast_paths": 1,
+        "learning_corrections": 1,
         "learning_feedbacks": 1,
         "procedure_matches": 3,
         "procedure_memory_records": 5,
@@ -3472,6 +3576,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert learning_gate_query["cases"][0]["learning_evidence_kinds"] == [
         "experience_records",
         "habit_fast_paths",
+        "learning_corrections",
         "learning_feedbacks",
         "procedure_matches",
         "procedure_memory_records",
@@ -3482,6 +3587,10 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert feedback_query["summary"]["matched_cases"] == 1
     assert feedback_query["cases"][0]["scenario_id"] == "learning_loop_case"
     assert "learning_feedbacks" in feedback_query["cases"][0]["learning_evidence_kinds"]
+    correction_query = dashboard["views"]["learning_correction_cases"]["query"]
+    assert correction_query["summary"]["matched_cases"] == 1
+    assert correction_query["cases"][0]["scenario_id"] == "learning_loop_case"
+    assert "learning_corrections" in correction_query["cases"][0]["learning_evidence_kinds"]
     governance_query = dashboard["views"]["learning_governance_cases"]["query"]
     assert governance_query["summary"]["matched_cases"] == 5
     assert governance_query["cases"][0]["scenario_id"] == "learning_loop_case"
@@ -3490,6 +3599,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert governance_query["cases"][0]["learning_evidence_kinds"] == [
         "experience_records",
         "habit_fast_paths",
+        "learning_corrections",
         "learning_feedbacks",
         "procedure_matches",
         "procedure_memory_records",
@@ -3502,6 +3612,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert history_query["cases"][0]["learning_evidence_kinds"] == [
         "experience_records",
         "habit_fast_paths",
+        "learning_corrections",
         "learning_feedbacks",
         "procedure_matches",
         "procedure_memory_records",
@@ -3518,6 +3629,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert approval_query["cases"][0]["learning_evidence_kinds"] == [
         "experience_records",
         "habit_fast_paths",
+        "learning_corrections",
         "learning_feedbacks",
         "procedure_matches",
         "procedure_memory_records",
@@ -3532,6 +3644,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert promotion_query["cases"][0]["learning_evidence_kinds"] == [
         "experience_records",
         "habit_fast_paths",
+        "learning_corrections",
         "learning_feedbacks",
         "procedure_matches",
         "procedure_memory_records",
@@ -3545,6 +3658,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert validation_query["cases"][0]["learning_evidence_kinds"] == [
         "experience_records",
         "habit_fast_paths",
+        "learning_corrections",
         "learning_feedbacks",
         "procedure_matches",
         "procedure_memory_records",
@@ -3644,6 +3758,7 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert "## Habit Fast Path Cases" in markdown
     assert "## Learning Match Explanation Cases" in markdown
     assert "## Learning Gate Cases" in markdown
+    assert "## Learning Correction Cases" in markdown
     assert "## Learning Governance Cases" in markdown
     assert "## Learning History Cases" in markdown
     assert "## Learning Approval Cases" in markdown
@@ -3673,6 +3788,10 @@ def test_evidence_dashboard_builds_common_runbook_views() -> None:
     assert "skill_validation" in markdown
     assert "learning_review_decision" in markdown
     assert "learning_audit_event" in markdown
+    assert (
+        "`poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-learning-kind learning_corrections`"
+        in markdown
+    )
     assert (
         "`poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-learning-kind procedure_memory_records,skill_lifecycle_records`"
         in markdown

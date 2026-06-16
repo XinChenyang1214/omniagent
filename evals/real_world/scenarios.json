@@ -267,6 +267,130 @@
       }
     },
     {
+      "id": "learning_loop_correction_recovery",
+      "kind": "task_sequence",
+      "category": "learning_loop",
+      "description": "Exercise correction after a verified procedure reuse failure, block stale reuse, then restore with fresh validation evidence.",
+      "timeout": 90,
+      "max_permission": "L2",
+      "steps": [
+        {
+          "type": "run",
+          "goal": "维护学习纠错循环审计记录：更新 reports/learning_correction_loop.md",
+          "expected_output": "reports/learning_correction_loop.md contains entry: draft.",
+          "executor": "file",
+          "payload": {
+            "action": "write",
+            "path": "reports/learning_correction_loop.md",
+            "content": "entry: draft\n",
+            "overwrite": true
+          },
+          "capture": {
+            "procedure_id": "learning_feedback.procedure.generated_draft_id",
+            "draft_task_id": "task.task_id"
+          }
+        },
+        {
+          "type": "cli",
+          "args": [
+            "learning",
+            "approve",
+            "--type",
+            "procedure",
+            "${procedure_id}",
+            "--evidence-ref",
+            "tasks/${draft_task_id}/completion/evaluation.json",
+            "--note",
+            "approve correction recovery source procedure"
+          ]
+        },
+        {
+          "type": "run",
+          "goal": "维护学习纠错循环审计记录：更新 reports/learning_correction_loop.md",
+          "expected_output": "This turn is expected to fail and trigger learning correction.",
+          "executor": "file",
+          "payload": {
+            "action": "unsupported",
+            "path": "reports/learning_correction_loop.md"
+          },
+          "capture": {
+            "failed_task_id": "task.task_id"
+          }
+        },
+        {
+          "type": "cli",
+          "args": [
+            "learning",
+            "explain-match",
+            "维护学习纠错循环审计记录：更新 reports/learning_correction_loop.md"
+          ]
+        },
+        {
+          "type": "run",
+          "goal": "维护学习纠错循环审计记录：更新 reports/learning_correction_loop.md",
+          "expected_output": "reports/learning_correction_loop.md contains entry: recovery.",
+          "executor": "file",
+          "payload": {
+            "action": "append",
+            "path": "reports/learning_correction_loop.md",
+            "content": "entry: recovery\n"
+          },
+          "capture": {
+            "recovery_task_id": "task.task_id"
+          }
+        },
+        {
+          "type": "cli",
+          "args": [
+            "learning",
+            "approve",
+            "--type",
+            "procedure",
+            "${procedure_id}",
+            "--evidence-ref",
+            "tasks/${recovery_task_id}/completion/evaluation.json",
+            "--note",
+            "fresh recovery evidence passed"
+          ]
+        },
+        {
+          "type": "cli",
+          "args": [
+            "learning",
+            "explain-match",
+            "维护学习纠错循环审计记录：更新 reports/learning_correction_loop.md"
+          ]
+        }
+      ],
+      "assertions": {
+        "min_successful_turns": 6,
+        "min_failed_turns": 1,
+        "file_contains": [
+          {"path": "reports/learning_correction_loop.md", "text": "entry: draft"},
+          {"path": "reports/learning_correction_loop.md", "text": "entry: recovery"}
+        ],
+        "required_skill_any": ["builtin.file.basic"],
+        "required_policy_decision_any": ["direct_execute"],
+        "required_learning_feedback_reuse_status_all": [
+          "new_draft_needs_review",
+          "correction_required"
+        ],
+        "required_learning_correction_trigger_any": ["validator_failure"],
+        "required_learning_correction_new_status_any": ["draft"],
+        "required_learning_correction_review_status_any": ["correction_required"],
+        "required_learning_correction_object_type_any": ["procedure"],
+        "require_learning_correction_frozen": true,
+        "required_procedure_status_any": ["verified"],
+        "required_procedure_review_status_any": ["approved"],
+        "required_procedure_audit_event_all": [
+          "created_from_experience",
+          "reviewed",
+          "promoted_to_verified",
+          "validator_failed"
+        ]
+      }
+    },
+    {
       "id": "csv_sales_summary",
       "kind": "task",
       "category": "data",

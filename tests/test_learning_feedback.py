@@ -12,6 +12,7 @@ from unittest.mock import patch
 from omniagent.cli import main
 from omniagent.config import AppConfig
 from omniagent.gateway import RuntimeGateway
+from omniagent.models import PermissionLevel, TaskConstraints, TaskRequest
 
 
 def _json_from_output(output: str) -> dict | list:
@@ -78,6 +79,22 @@ class LearningFeedbackIntegrationTest(unittest.TestCase):
                 "L2",
                 "--json",
             ]
+        )
+
+    def _submit_file_task(
+        self,
+        gateway: RuntimeGateway,
+        goal: str,
+        *,
+        payload: dict[str, object],
+    ):
+        return gateway.submit(
+            TaskRequest(
+                goal=goal,
+                executor="file",
+                payload=payload,
+                constraints=TaskConstraints(max_permission=PermissionLevel.L2),
+            )
         )
 
     def test_first_run_feedback_explains_draft_and_review_action(self) -> None:
@@ -186,6 +203,84 @@ class LearningFeedbackIntegrationTest(unittest.TestCase):
         self.assertTrue(
             any("learning disable --type habit" in command for command in feedback["review"]["commands"])
         )
+
+    def test_failed_reuse_feedback_records_correction_and_blocks_future_match(self) -> None:
+        gateway = self._build_gateway()
+        first = self._submit_file_task(
+            gateway,
+            "维护学习纠错审计记录：写入 reports/feedback-correction.md",
+            payload={
+                "action": "write",
+                "path": "reports/feedback-correction.md",
+                "content": "entry: first\n",
+                "overwrite": True,
+            },
+        )
+        self.assertTrue(first.result.success, first.result.message)
+        procedure_id = first.learning_feedback["procedure"]["generated_draft_id"]
+        assert procedure_id is not None
+        gateway.procedure_memory.review(
+            procedure_id,
+            decision="approved",
+            evidence_refs=[f"tasks/{first.task.task_id}/completion/evaluation.json"],
+            note="approve correction test procedure",
+        )
+
+        failed = self._submit_file_task(
+            gateway,
+            "维护学习纠错审计记录：写入 reports/feedback-correction.md",
+            payload={"action": "unsupported", "path": "reports/feedback-correction.md"},
+        )
+
+        self.assertFalse(failed.result.success)
+        correction_path = (
+            self.workspace
+            / "tasks"
+            / failed.task.task_id
+            / "learning"
+            / "correction.json"
+        )
+        self.assertTrue(correction_path.exists())
+        correction = json.loads(correction_path.read_text(encoding="utf-8"))
+        self.assertEqual(correction["schema_version"], "learning-correction/v1")
+        self.assertEqual(correction["procedure_id"], procedure_id)
+        self.assertEqual(correction["previous_status"], "verified")
+        self.assertEqual(correction["new_status"], "draft")
+        self.assertEqual(correction["new_review_status"], "correction_required")
+        self.assertTrue(correction["frozen"])
+        feedback = failed.learning_feedback
+        self.assertTrue(feedback["correction"]["recorded"])
+        self.assertEqual(feedback["reuse"]["status"], "correction_required")
+        self.assertFalse(feedback["reuse"]["reusable_now"])
+        match = gateway.procedure_memory.explain_match(
+            "维护学习纠错审计记录：写入 reports/feedback-correction.md"
+        )
+        self.assertFalse(match["matched"])
+
+        recovery = self._submit_file_task(
+            gateway,
+            "维护学习纠错审计记录：写入 reports/feedback-correction.md",
+            payload={
+                "action": "append",
+                "path": "reports/feedback-correction.md",
+                "content": "entry: recovery\n",
+            },
+        )
+        self.assertTrue(recovery.result.success, recovery.result.message)
+        restored = gateway.procedure_memory.review(
+            procedure_id,
+            decision="approved",
+            evidence_refs=[f"tasks/{recovery.task.task_id}/completion/evaluation.json"],
+            note="fresh recovery evidence passed",
+        )
+        self.assertEqual(restored["status"], "verified")
+        self.assertEqual(restored["review_status"], "approved")
+        self.assertEqual(restored["failure_count"], 0)
+        restored_match = gateway.procedure_memory.explain_match(
+            "维护学习纠错审计记录：写入 reports/feedback-correction.md"
+        )
+        self.assertTrue(restored_match["matched"])
+        self.assertEqual(restored_match["matched_procedure_id"], procedure_id)
 
 
 if __name__ == "__main__":

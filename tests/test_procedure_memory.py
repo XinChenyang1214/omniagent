@@ -138,7 +138,44 @@ class ProcedureMemoryStoreTest(unittest.TestCase):
         )
 
         self.assertEqual(updated["status"], "draft")
+        self.assertEqual(updated["review_status"], "correction_required")
         self.assertEqual(updated["failure_count"], 1)
+        match = self.store.explain_match("write reusable report again")
+        self.assertFalse(match["matched"])
+        self.assertEqual(
+            match["rejected_candidates"][0]["reason"],
+            "procedure requires correction review before reuse",
+        )
+
+    def test_correction_review_with_fresh_evidence_restores_reuse(self) -> None:
+        draft = self.store.extract_draft_from_experience(_passed_experience())
+        assert draft is not None
+        verified = self.store.promote_to_verified(
+            draft["procedure_id"],
+            evidence_refs=["tasks/task_source/completion/evaluation.json"],
+        )
+        failed = self.store.record_validator_failure(
+            verified["procedure_id"],
+            evidence_ref="tasks/task_new/completion/evaluation.json",
+            reason="validator failed",
+        )
+        self.assertEqual(failed["status"], "draft")
+        self.assertEqual(failed["review_status"], "correction_required")
+
+        reviewed = self.store.review(
+            failed["procedure_id"],
+            decision="approved",
+            reviewer="tester",
+            evidence_refs=["tasks/task_recovery/completion/evaluation.json"],
+            note="fresh evidence passed",
+        )
+        match = self.store.explain_match("write reusable report again")
+
+        self.assertEqual(reviewed["status"], "verified")
+        self.assertEqual(reviewed["review_status"], "approved")
+        self.assertEqual(reviewed["failure_count"], 0)
+        self.assertTrue(match["matched"])
+        self.assertEqual(match["matched_procedure_id"], verified["procedure_id"])
 
     def test_consecutive_validator_failures_disable_procedure(self) -> None:
         draft = self.store.extract_draft_from_experience(_passed_experience())
@@ -160,6 +197,7 @@ class ProcedureMemoryStoreTest(unittest.TestCase):
         )
 
         self.assertEqual(disabled["status"], "disabled")
+        self.assertEqual(disabled["review_status"], "disabled")
         self.assertEqual(disabled["failure_count"], 2)
 
     def test_habit_promotion_requires_three_verified_successes(self) -> None:
@@ -266,6 +304,7 @@ class ProcedureMemoryStoreTest(unittest.TestCase):
         )
 
         self.assertEqual(downgraded["status"], "verified")
+        self.assertEqual(downgraded["review_status"], "correction_required")
         self.assertEqual(downgraded["failure_count"], 1)
 
     def test_high_risk_habit_match_requires_confirmation(self) -> None:

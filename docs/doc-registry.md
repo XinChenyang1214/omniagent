@@ -1,6 +1,6 @@
 # 文档登记表
 
-Last reviewed：2026-06-15
+Last reviewed：2026-06-16
 
 本登记表记录文档治理状态。`implementation_status` 反映本次整理时文档中记载的项目状态；除非特别说明，它不是一次新的代码审计结论。
 
@@ -34,6 +34,7 @@ Last reviewed：2026-06-15
 | `docs/specs/procedure-memory.md` | spec | `META-010` / Procedure memory | confirmed | implemented | procedure / verified procedure / habit 的生命周期、存储、检索、升级规则和 Phase 4 habit fast path；skill promotion 归 Phase 5 | none |
 | `docs/specs/skill-promotion.md` | spec | `META-010` / Skill promotion | confirmed | implemented | stable habit -> skill promotion 的 gate、lineage、contract、权限和验证规则 | none |
 | `docs/specs/learning-feedback.md` | spec | `META-010` / Learning feedback | confirmed | verified | 任务结束后向用户展示 experience / procedure / habit 学习状态、复用判断和治理入口的最小输出契约；真实评测 evidence index / dashboard 已接入 `learning_feedbacks` | none |
+| `docs/specs/learning-correction.md` | spec | `META-010` / Learning correction | confirmed | verified | procedure / habit 复用失败、过期或用户修正后的纠错、降级、冻结、解释、复审和恢复证据契约；真实评测 evidence index / dashboard 已接入 `learning_corrections` | none |
 | `AGENTS.md` | operations / project rules | agent collaboration | active | not_applicable | 项目规则、常用命令、安全边界、权威文档顺序 | none |
 | `ARCHITECTURE.md` | current-state / architecture | legacy core runtime | active | implemented_unverified | 旧实现架构和迁移输入；不再作为目标产品架构 | `docs/product-architecture.md` for target architecture |
 | `CONFIGURATION.md` | spec / operations | runtime configuration | active | implemented_unverified | 配置文件、环境变量、provider、权限和沙箱选项 | none |
@@ -80,6 +81,7 @@ Last reviewed：2026-06-15
 - 2026-06-12 已补齐 `META-010` Phase 1-5 specs：Agent state、Experience records、Procedure memory、Skill promotion。
 - 2026-06-12 已实现 Phase 1 Agent state、Phase 2 Experience records、Phase 3 Procedure memory、Phase 4 Habit fast path 和 Phase 5 Skill promotion；下一步进入 learning-loop 真实评测与治理增强。
 - 2026-06-15 新增并验证 Learning feedback spec，用于把已有学习闭环状态呈现在 task-ending reply 中，提高用户可感知性；`learning_loop_feedback_sequence` 已把连续任务学习反馈接入 evidence index / dashboard。
+- 2026-06-16 新增并验证 Learning correction spec，用于约束复用失败后的降级、冻结、解释、fresh evidence 复审恢复和 dashboard evidence；`learning_loop_correction_recovery` 已把纠错闭环接入 `learning_corrections` evidence kind。
 
 ## 待确认治理项
 

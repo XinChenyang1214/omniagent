@@ -1027,6 +1027,7 @@ class EmbeddedRuntime:
         try:
             matched_procedure_updated = self._update_matched_procedure_from_experience(
                 task=task,
+                task_dir=Path(task_dir),
                 result=result,
                 record=record,
                 context_bundle=context_bundle,
@@ -1043,6 +1044,7 @@ class EmbeddedRuntime:
         self,
         *,
         task: Task,
+        task_dir: Path,
         result: ExecutionResult,
         record: dict[str, Any],
         context_bundle: dict[str, Any],
@@ -1078,12 +1080,99 @@ class EmbeddedRuntime:
                 else f"tasks/{task.task_id}/experience/experience_record.json"
             )
             reason = str(validation.get("notes") or result.message or "matched procedure failed validation")
-            self.procedure_memory.record_validator_failure(
+            previous_review_status = str(procedure.get("review_status") or "")
+            updated = self.procedure_memory.record_validator_failure(
                 procedure_id,
                 evidence_ref=evidence_ref,
                 reason=reason,
             )
+            self.artifact_manager.write_learning_correction(
+                task_dir,
+                self._build_learning_correction(
+                    task=task,
+                    record=record,
+                    procedure_match=procedure_match,
+                    previous=procedure,
+                    updated=updated,
+                    previous_review_status=previous_review_status,
+                    evidence_refs=evidence_refs or [evidence_ref],
+                    reason=reason,
+                    trigger="validator_failure",
+                ),
+            )
         return True
+
+    def _build_learning_correction(
+        self,
+        *,
+        task: Task,
+        record: dict[str, Any],
+        procedure_match: dict[str, Any],
+        previous: dict[str, Any],
+        updated: dict[str, Any],
+        previous_review_status: str,
+        evidence_refs: list[str],
+        reason: str,
+        trigger: str,
+    ) -> dict[str, Any]:
+        procedure_id = str(updated.get("procedure_id") or previous.get("procedure_id") or "")
+        previous_status = str(previous.get("status") or "")
+        new_status = str(updated.get("status") or "")
+        new_review_status = str(updated.get("review_status") or "")
+        object_type = "habit" if previous_status == "habit" else "procedure"
+        frozen = (
+            new_status in {"draft", "disabled", "deprecated"}
+            or new_review_status in {
+                "correction_required",
+                "edited_requires_review",
+                "decayed_requires_review",
+                "needs_changes",
+                "disabled",
+            }
+            or int(updated.get("failure_count", 0) or 0) > 0
+        )
+        review_type = "habit" if object_type == "habit" and new_status == "habit" else "procedure"
+        next_actions = [
+            f"omniagent learning show --type {review_type} {procedure_id} --include-disabled",
+            f"omniagent learning history --type {review_type} {procedure_id} --include-disabled",
+            f"omniagent learning explain-match {json.dumps(task.goal, ensure_ascii=False)}",
+        ]
+        if new_status == "disabled":
+            next_actions.append(f"omniagent learning enable --type {review_type} {procedure_id}")
+        else:
+            next_actions.extend(
+                [
+                    f"omniagent learning edit --type {review_type} {procedure_id} --patch '{{...}}'",
+                    (
+                        f"omniagent learning approve --type {review_type} {procedure_id} "
+                        "--evidence-ref <fresh-validation-ref>"
+                    ),
+                ]
+            )
+        return {
+            "schema_version": "learning-correction/v1",
+            "generated_at": utc_now(),
+            "task_id": task.task_id,
+            "experience_id": record.get("experience_id"),
+            "procedure_id": procedure_id,
+            "object_type": object_type,
+            "trigger": trigger,
+            "previous_status": previous_status,
+            "new_status": new_status,
+            "previous_review_status": previous_review_status or None,
+            "new_review_status": new_review_status or None,
+            "failure_count": int(updated.get("failure_count", 0) or 0),
+            "frozen": frozen,
+            "evidence_refs": [str(item) for item in evidence_refs],
+            "reason": reason,
+            "source_match": {
+                "matched_id": procedure_match.get("matched_procedure_id"),
+                "matched_status": procedure_match.get("matched_status"),
+                "suggestion_mode": procedure_match.get("suggestion_mode"),
+                "confidence": procedure_match.get("confidence"),
+            },
+            "next_actions": next_actions,
+        }
 
     def _policy_context_counts(
         self,
