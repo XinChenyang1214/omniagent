@@ -1521,6 +1521,762 @@
       }
     },
     {
+      "id": "general_agent_usability_file_organization",
+      "kind": "task_sequence",
+      "category": "general_agent_usability",
+      "description": "General-agent file organization path with intake, reuse, and correction evidence.",
+      "setup_files": {
+        "inbox/alpha.txt": "alpha\n",
+        "inbox/beta.txt": "beta\n"
+      },
+      "timeout": 90,
+      "max_permission": "L2",
+      "steps": [
+        {
+          "type": "run",
+          "goal": "通用可用性文件整理：复制 inbox/alpha.txt 到 archive/alpha.txt",
+          "expected_output": "archive/alpha.txt exists and contains alpha.",
+          "executor": "file",
+          "payload": {
+            "action": "copy",
+            "source": "inbox/alpha.txt",
+            "target": "archive/alpha.txt",
+            "overwrite": true
+          },
+          "capture": {
+            "procedure_id": "learning_feedback.procedure.generated_draft_id",
+            "draft_task_id": "task.task_id"
+          }
+        },
+        {
+          "type": "cli",
+          "args": [
+            "procedure",
+            "review",
+            "${procedure_id}",
+            "--decision",
+            "approved",
+            "--evidence-ref",
+            "tasks/${draft_task_id}/completion/evaluation.json",
+            "--note",
+            "approve general file organization procedure"
+          ]
+        },
+        {
+          "type": "run",
+          "goal": "通用可用性文件整理：复制 inbox/beta.txt 到 archive/beta.txt",
+          "expected_output": "archive/beta.txt exists and contains beta.",
+          "executor": "file",
+          "payload": {
+            "action": "copy",
+            "source": "inbox/beta.txt",
+            "target": "archive/beta.txt",
+            "overwrite": true
+          }
+        },
+        {
+          "type": "run",
+          "goal": "通用可用性文件整理：复制 inbox/missing.txt 到 archive/missing.txt",
+          "expected_output": "This turn is expected to fail and trigger learning correction.",
+          "executor": "file",
+          "payload": {
+            "action": "copy",
+            "source": "inbox/missing.txt",
+            "target": "archive/missing.txt",
+            "overwrite": true
+          }
+        }
+      ],
+      "assertions": {
+        "min_successful_turns": 3,
+        "min_failed_turns": 1,
+        "file_contains": [
+          {"path": "archive/alpha.txt", "text": "alpha"},
+          {"path": "archive/beta.txt", "text": "beta"}
+        ],
+        "file_not_exists": ["archive/missing.txt"],
+        "required_skill_any": ["builtin.file.basic"],
+        "required_policy_decision_any": ["direct_execute"],
+        "required_intake_task_type_any": ["file_organization"],
+        "required_intake_risk_level_any": ["low"],
+        "required_intake_tool_any": ["builtin.file.basic"],
+        "required_intake_validation_strategy_any": ["artifact_file_check"],
+        "required_intake_confirmation_required": false,
+        "required_learning_feedback_reuse_status_all": [
+          "new_draft_needs_review",
+          "verified_procedure_reuse",
+          "correction_required"
+        ],
+        "required_learning_correction_trigger_any": ["validator_failure"],
+        "required_learning_correction_review_status_any": ["correction_required"]
+      }
+    },
+    {
+      "id": "general_agent_usability_information_synthesis",
+      "kind": "task_sequence",
+      "category": "general_agent_usability",
+      "description": "General-agent information synthesis path with intake, reuse, and correction evidence.",
+      "setup_files": {
+        "notes/source.md": "alpha insight\nbeta risk\n"
+      },
+      "timeout": 90,
+      "max_permission": "L2",
+      "steps": [
+        {
+          "type": "run",
+          "goal": "通用可用性信息归纳：写入 reports/brief.md",
+          "expected_output": "reports/brief.md contains summary: alpha insight.",
+          "executor": "file",
+          "payload": {
+            "action": "write",
+            "path": "reports/brief.md",
+            "content": "summary: alpha insight\nrisk: beta risk\n",
+            "overwrite": true
+          },
+          "capture": {
+            "procedure_id": "learning_feedback.procedure.generated_draft_id",
+            "draft_task_id": "task.task_id"
+          }
+        },
+        {
+          "type": "cli",
+          "args": [
+            "procedure",
+            "review",
+            "${procedure_id}",
+            "--decision",
+            "approved",
+            "--evidence-ref",
+            "tasks/${draft_task_id}/completion/evaluation.json",
+            "--note",
+            "approve general synthesis procedure"
+          ]
+        },
+        {
+          "type": "run",
+          "goal": "通用可用性信息归纳：写入 reports/brief_reuse.md",
+          "expected_output": "reports/brief_reuse.md contains summary: beta risk.",
+          "executor": "file",
+          "payload": {
+            "action": "write",
+            "path": "reports/brief_reuse.md",
+            "content": "summary: beta risk\n",
+            "overwrite": true
+          }
+        },
+        {
+          "type": "run",
+          "goal": "通用可用性信息归纳：写入 reports/brief_missing.md",
+          "expected_output": "This turn is expected to fail and trigger learning correction.",
+          "executor": "file",
+          "payload": {
+            "action": "read",
+            "path": "notes/missing.md"
+          }
+        }
+      ],
+      "assertions": {
+        "min_successful_turns": 3,
+        "min_failed_turns": 1,
+        "file_contains": [
+          {"path": "reports/brief.md", "text": "summary: alpha insight"},
+          {"path": "reports/brief_reuse.md", "text": "summary: beta risk"}
+        ],
+        "file_not_exists": ["reports/brief_missing.md"],
+        "required_skill_any": ["builtin.file.basic"],
+        "required_policy_decision_any": ["direct_execute"],
+        "required_intake_task_type_any": ["information_synthesis"],
+        "required_intake_risk_level_any": ["low"],
+        "required_intake_tool_any": ["builtin.file.basic"],
+        "required_intake_validation_strategy_any": ["artifact_file_check"],
+        "required_intake_confirmation_required": false,
+        "required_learning_feedback_reuse_status_all": [
+          "new_draft_needs_review",
+          "verified_procedure_reuse",
+          "correction_required"
+        ],
+        "required_learning_correction_trigger_any": ["validator_failure"],
+        "required_learning_correction_review_status_any": ["correction_required"]
+      }
+    },
+    {
+      "id": "general_agent_usability_document_generation",
+      "kind": "task_sequence",
+      "category": "general_agent_usability",
+      "description": "General-agent document generation path with intake, reuse, and correction evidence.",
+      "setup_files": {
+        "docs/worknote.md": "# Worknote\n\n## Existing\nold\n"
+      },
+      "timeout": 90,
+      "max_permission": "L2",
+      "steps": [
+        {
+          "type": "run",
+          "goal": "通用可用性文档生成：给 docs/worknote.md 追加 Summary 小节",
+          "expected_output": "docs/worknote.md contains Summary and status: drafted.",
+          "skill": "builtin.text.markdown",
+          "payload": {
+            "action": "append_section",
+            "path": "docs/worknote.md",
+            "heading": "Summary",
+            "content": "status: drafted"
+          },
+          "capture": {
+            "procedure_id": "learning_feedback.procedure.generated_draft_id",
+            "draft_task_id": "task.task_id"
+          }
+        },
+        {
+          "type": "cli",
+          "args": [
+            "procedure",
+            "review",
+            "${procedure_id}",
+            "--decision",
+            "approved",
+            "--evidence-ref",
+            "tasks/${draft_task_id}/completion/evaluation.json",
+            "--note",
+            "approve general document generation procedure"
+          ]
+        },
+        {
+          "type": "run",
+          "goal": "通用可用性文档生成：给 docs/worknote.md 追加 Next 小节",
+          "expected_output": "docs/worknote.md contains Next and action: review.",
+          "skill": "builtin.text.markdown",
+          "payload": {
+            "action": "append_section",
+            "path": "docs/worknote.md",
+            "heading": "Next",
+            "content": "action: review"
+          }
+        },
+        {
+          "type": "run",
+          "goal": "通用可用性文档生成：替换 docs/worknote.md 中 Missing 小节",
+          "expected_output": "This turn is expected to fail and trigger learning correction.",
+          "skill": "builtin.text.markdown",
+          "payload": {
+            "action": "replace_section",
+            "path": "docs/worknote.md",
+            "heading": "Missing",
+            "content": "should fail"
+          }
+        }
+      ],
+      "assertions": {
+        "min_successful_turns": 3,
+        "min_failed_turns": 1,
+        "file_contains": [
+          {"path": "docs/worknote.md", "text": "## Summary"},
+          {"path": "docs/worknote.md", "text": "status: drafted"},
+          {"path": "docs/worknote.md", "text": "## Next"},
+          {"path": "docs/worknote.md", "text": "action: review"}
+        ],
+        "required_skill_any": ["builtin.text.markdown"],
+        "required_policy_decision_any": ["direct_execute"],
+        "required_intake_task_type_any": ["document_generation"],
+        "required_intake_risk_level_any": ["low"],
+        "required_intake_tool_any": ["builtin.text.markdown"],
+        "required_intake_validation_strategy_any": ["artifact_file_check"],
+        "required_intake_confirmation_required": false,
+        "required_learning_feedback_reuse_status_all": [
+          "new_draft_needs_review",
+          "verified_procedure_reuse",
+          "correction_required"
+        ],
+        "required_learning_correction_trigger_any": ["validator_failure"],
+        "required_learning_correction_review_status_any": ["correction_required"]
+      }
+    },
+    {
+      "id": "general_agent_usability_data_processing",
+      "kind": "task_sequence",
+      "category": "general_agent_usability",
+      "description": "General-agent data processing path with intake, reuse, and correction evidence.",
+      "setup_files": {
+        "inputs/sales.csv": "region,revenue\nnorth,20\nsouth,50\n"
+      },
+      "timeout": 90,
+      "max_permission": "L2",
+      "steps": [
+        {
+          "type": "run",
+          "goal": "通用可用性数据处理：汇总 inputs/sales.csv 到 reports/sales.md",
+          "expected_output": "reports/sales.md contains total_revenue: 70.0.",
+          "skill": "builtin.data.csv",
+          "payload": {
+            "action": "report",
+            "path": "inputs/sales.csv",
+            "metrics": [
+              {"name": "total_revenue", "op": "sum", "column": "revenue"}
+            ],
+            "output_path": "reports/sales.md",
+            "overwrite": true
+          },
+          "capture": {
+            "procedure_id": "learning_feedback.procedure.generated_draft_id",
+            "draft_task_id": "task.task_id"
+          }
+        },
+        {
+          "type": "cli",
+          "args": [
+            "procedure",
+            "review",
+            "${procedure_id}",
+            "--decision",
+            "approved",
+            "--evidence-ref",
+            "tasks/${draft_task_id}/completion/evaluation.json",
+            "--note",
+            "approve general data processing procedure"
+          ]
+        },
+        {
+          "type": "run",
+          "goal": "通用可用性数据处理：汇总 inputs/sales.csv 到 reports/sales_north.md",
+          "expected_output": "reports/sales_north.md contains north_revenue: 20.0.",
+          "skill": "builtin.data.csv",
+          "payload": {
+            "action": "report",
+            "path": "inputs/sales.csv",
+            "metrics": [
+              {
+                "name": "north_revenue",
+                "op": "sum",
+                "column": "revenue",
+                "filters": [{"column": "region", "op": "equals", "value": "north"}]
+              }
+            ],
+            "output_path": "reports/sales_north.md",
+            "overwrite": true
+          }
+        },
+        {
+          "type": "run",
+          "goal": "通用可用性数据处理：汇总 inputs/sales.csv 中缺失字段",
+          "expected_output": "This turn is expected to fail and trigger learning correction.",
+          "skill": "builtin.data.csv",
+          "payload": {
+            "action": "report",
+            "path": "inputs/sales.csv",
+            "metrics": [
+              {"name": "missing_total", "op": "sum", "column": "missing"}
+            ],
+            "output_path": "reports/sales_missing.md",
+            "overwrite": true
+          }
+        }
+      ],
+      "assertions": {
+        "min_successful_turns": 3,
+        "min_failed_turns": 1,
+        "file_contains": [
+          {"path": "reports/sales.md", "text": "total_revenue: 70.0"},
+          {"path": "reports/sales_north.md", "text": "north_revenue: 20.0"}
+        ],
+        "file_not_exists": ["reports/sales_missing.md"],
+        "required_skill_any": ["builtin.data.csv"],
+        "required_policy_decision_any": ["direct_execute"],
+        "required_intake_task_type_any": ["data_processing"],
+        "required_intake_risk_level_any": ["low"],
+        "required_intake_tool_any": ["builtin.data.csv"],
+        "required_intake_validation_strategy_any": ["data_result_and_artifact_check"],
+        "required_intake_confirmation_required": false,
+        "required_learning_feedback_reuse_status_all": [
+          "new_draft_needs_review",
+          "verified_procedure_reuse",
+          "correction_required"
+        ],
+        "required_learning_correction_trigger_any": ["validator_failure"],
+        "required_learning_correction_review_status_any": ["correction_required"]
+      }
+    },
+    {
+      "id": "general_agent_usability_web_information",
+      "kind": "task_sequence",
+      "category": "general_agent_usability",
+      "description": "General-agent web information path with intake, reuse, and correction evidence.",
+      "setup_files": {
+        "inputs/page_a.html": "<html><head><title>Alpha Status</title></head><body><a href=\"/a\">A</a><p>alpha ready</p></body></html>",
+        "inputs/page_b.html": "<html><head><title>Beta Status</title></head><body><a href=\"/b\">B</a><p>beta ready</p></body></html>"
+      },
+      "timeout": 90,
+      "max_permission": "L2",
+      "steps": [
+        {
+          "type": "run",
+          "goal": "通用可用性网页信息获取：解析 inputs/page_a.html 到 reports/page_a.md",
+          "expected_output": "reports/page_a.md contains title: Alpha Status and link_count: 1.",
+          "skill": "builtin.web.html",
+          "payload": {
+            "action": "report",
+            "path": "inputs/page_a.html",
+            "output_path": "reports/page_a.md",
+            "overwrite": true
+          },
+          "capture": {
+            "procedure_id": "learning_feedback.procedure.generated_draft_id",
+            "draft_task_id": "task.task_id"
+          }
+        },
+        {
+          "type": "cli",
+          "args": [
+            "procedure",
+            "review",
+            "${procedure_id}",
+            "--decision",
+            "approved",
+            "--evidence-ref",
+            "tasks/${draft_task_id}/completion/evaluation.json",
+            "--note",
+            "approve general web information procedure"
+          ]
+        },
+        {
+          "type": "run",
+          "goal": "通用可用性网页信息获取：解析 inputs/page_b.html 到 reports/page_b.md",
+          "expected_output": "reports/page_b.md contains title: Beta Status and link_count: 1.",
+          "skill": "builtin.web.html",
+          "payload": {
+            "action": "report",
+            "path": "inputs/page_b.html",
+            "output_path": "reports/page_b.md",
+            "overwrite": true
+          }
+        },
+        {
+          "type": "run",
+          "goal": "通用可用性网页信息获取：解析 inputs/missing.html 到 reports/page_missing.md",
+          "expected_output": "This turn is expected to fail and trigger learning correction.",
+          "skill": "builtin.web.html",
+          "payload": {
+            "action": "report",
+            "path": "inputs/missing.html",
+            "output_path": "reports/page_missing.md",
+            "overwrite": true
+          }
+        }
+      ],
+      "assertions": {
+        "min_successful_turns": 3,
+        "min_failed_turns": 1,
+        "file_contains": [
+          {"path": "reports/page_a.md", "text": "title: Alpha Status"},
+          {"path": "reports/page_b.md", "text": "title: Beta Status"}
+        ],
+        "file_not_exists": ["reports/page_missing.md"],
+        "required_skill_any": ["builtin.web.html"],
+        "required_policy_decision_any": ["direct_execute"],
+        "required_intake_task_type_any": ["web_information"],
+        "required_intake_risk_level_any": ["low"],
+        "required_intake_tool_any": ["builtin.web.html"],
+        "required_intake_validation_strategy_any": ["retrieved_content_check"],
+        "required_intake_confirmation_required": false,
+        "required_learning_feedback_reuse_status_all": [
+          "new_draft_needs_review",
+          "verified_procedure_reuse",
+          "correction_required"
+        ],
+        "required_learning_correction_trigger_any": ["validator_failure"],
+        "required_learning_correction_review_status_any": ["correction_required"]
+      }
+    },
+    {
+      "id": "general_agent_usability_file_organization_tool_choice",
+      "kind": "task",
+      "category": "general_agent_usability",
+      "description": "Natural-language file organization task requires Planner tool choice.",
+      "setup_files": {
+        "inbox/alpha.txt": "alpha\n"
+      },
+      "goal": "Copy inbox/alpha.txt to archive/alpha.txt.",
+      "expected_output": "archive/alpha.txt exists and contains alpha.",
+      "timeout": 90,
+      "max_permission": "L2",
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "archive/alpha.txt", "text": "alpha"}
+        ],
+        "required_skill_any": ["builtin.file.basic"],
+        "required_policy_decision_any": ["plan_required"],
+        "required_llm_prompt_any": ["planner_v1"],
+        "required_intake_task_type_any": ["file_organization"],
+        "required_intake_risk_level_any": ["low"],
+        "required_intake_tool_any": ["builtin.file.basic"],
+        "required_intake_validation_strategy_any": ["artifact_file_check"],
+        "required_intake_confirmation_required": false
+      }
+    },
+    {
+      "id": "general_agent_usability_information_synthesis_tool_choice",
+      "kind": "task",
+      "category": "general_agent_usability",
+      "description": "Natural-language information synthesis task requires Planner tool choice.",
+      "setup_files": {
+        "notes/source.md": "alpha insight\nbeta risk\n"
+      },
+      "goal": "Summarize notes/source.md into reports/brief.md with content summary: alpha insight.",
+      "expected_output": "reports/brief.md contains summary: alpha insight.",
+      "timeout": 90,
+      "max_permission": "L2",
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/brief.md", "text": "summary: alpha insight"}
+        ],
+        "required_skill_any": ["builtin.file.basic"],
+        "required_policy_decision_any": ["plan_required"],
+        "required_llm_prompt_any": ["planner_v1"],
+        "required_intake_task_type_any": ["information_synthesis"],
+        "required_intake_risk_level_any": ["low"],
+        "required_intake_tool_any": ["builtin.file.basic"],
+        "required_intake_validation_strategy_any": ["completion_evaluation"],
+        "required_intake_confirmation_required": false
+      }
+    },
+    {
+      "id": "general_agent_usability_document_generation_tool_choice",
+      "kind": "task",
+      "category": "general_agent_usability",
+      "description": "Natural-language document generation task requires Planner tool choice.",
+      "setup_files": {
+        "docs/worknote.md": "# Worknote\n"
+      },
+      "goal": "Append Summary section to docs/worknote.md with content status: drafted.",
+      "expected_output": "docs/worknote.md contains Summary and status: drafted.",
+      "timeout": 90,
+      "max_permission": "L2",
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "docs/worknote.md", "text": "## Summary"},
+          {"path": "docs/worknote.md", "text": "status: drafted"}
+        ],
+        "required_skill_any": ["builtin.text.markdown"],
+        "required_policy_decision_any": ["plan_required"],
+        "required_llm_prompt_any": ["planner_v1"],
+        "required_intake_task_type_any": ["document_generation"],
+        "required_intake_risk_level_any": ["low"],
+        "required_intake_tool_any": ["builtin.text.markdown"],
+        "required_intake_validation_strategy_any": ["artifact_file_check"],
+        "required_intake_confirmation_required": false
+      }
+    },
+    {
+      "id": "general_agent_usability_data_processing_tool_choice",
+      "kind": "task",
+      "category": "general_agent_usability",
+      "description": "Natural-language data processing task requires Planner tool choice.",
+      "setup_files": {
+        "inputs/sales.csv": "region,revenue\nnorth,20\nsouth,50\n"
+      },
+      "goal": "Sum revenue from inputs/sales.csv and write reports/sales.md.",
+      "expected_output": "reports/sales.md contains total_revenue: 70.0.",
+      "timeout": 90,
+      "max_permission": "L2",
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/sales.md", "text": "total_revenue: 70.0"}
+        ],
+        "required_skill_any": ["builtin.data.csv"],
+        "required_policy_decision_any": ["plan_required"],
+        "required_llm_prompt_any": ["planner_v1"],
+        "required_intake_task_type_any": ["data_processing"],
+        "required_intake_risk_level_any": ["low"],
+        "required_intake_tool_any": ["builtin.data.csv"],
+        "required_intake_validation_strategy_any": ["data_result_and_artifact_check"],
+        "required_intake_confirmation_required": false
+      }
+    },
+    {
+      "id": "general_agent_usability_web_information_tool_choice",
+      "kind": "task",
+      "category": "general_agent_usability",
+      "description": "Natural-language local web information task requires Planner tool choice.",
+      "setup_files": {
+        "inputs/page_a.html": "<html><head><title>Alpha Status</title></head><body><a href=\"/a\">A</a><p>alpha ready</p></body></html>"
+      },
+      "goal": "Create an HTML report from inputs/page_a.html at reports/page_a.md.",
+      "expected_output": "reports/page_a.md contains title: Alpha Status and link_count: 1.",
+      "timeout": 90,
+      "max_permission": "L2",
+      "assertions": {
+        "must_succeed": true,
+        "file_contains": [
+          {"path": "reports/page_a.md", "text": "title: Alpha Status"},
+          {"path": "reports/page_a.md", "text": "link_count: 1"}
+        ],
+        "required_skill_any": ["builtin.web.html"],
+        "required_policy_decision_any": ["plan_required"],
+        "required_llm_prompt_any": ["planner_v1"],
+        "required_intake_task_type_any": ["web_information"],
+        "required_intake_risk_level_any": ["low"],
+        "required_intake_tool_any": ["builtin.web.html"],
+        "required_intake_validation_strategy_any": ["retrieved_content_check"],
+        "required_intake_confirmation_required": false
+      }
+    },
+    {
+      "id": "general_agent_usability_file_organization_permission_boundary",
+      "kind": "task",
+      "category": "general_agent_usability",
+      "description": "General-agent file organization permission boundary blocks unapproved delete.",
+      "setup_files": {
+        "inbox/protected.txt": "keep\n"
+      },
+      "goal": "通用可用性文件整理权限边界：删除 inbox/protected.txt",
+      "expected_output": "The task must be blocked because delete permission is not granted.",
+      "executor": "file",
+      "payload": {
+        "action": "delete",
+        "path": "inbox/protected.txt"
+      },
+      "max_permission": "L2",
+      "timeout": 90,
+      "assertions": {
+        "must_not_succeed": true,
+        "file_contains": [
+          {"path": "inbox/protected.txt", "text": "keep"}
+        ],
+        "required_policy_risk_flag_any": ["delete"],
+        "required_experience_status_any": ["permission_denied"],
+        "required_failure_layer_any": ["permission"],
+        "required_intake_task_type_any": ["file_organization"],
+        "required_intake_risk_level_any": ["high"],
+        "required_intake_tool_any": ["builtin.file.basic"],
+        "required_intake_validation_strategy_any": ["artifact_file_check"],
+        "required_intake_confirmation_required": true
+      }
+    },
+    {
+      "id": "general_agent_usability_information_synthesis_permission_boundary",
+      "kind": "task",
+      "category": "general_agent_usability",
+      "description": "General-agent information synthesis permission boundary blocks unapproved delete.",
+      "setup_files": {
+        "reports/brief.md": "summary: keep\n"
+      },
+      "goal": "通用可用性信息归纳权限边界：删除 reports/brief.md",
+      "expected_output": "The task must be blocked because delete permission is not granted.",
+      "executor": "file",
+      "payload": {
+        "action": "delete",
+        "path": "reports/brief.md"
+      },
+      "max_permission": "L2",
+      "timeout": 90,
+      "assertions": {
+        "must_not_succeed": true,
+        "file_contains": [
+          {"path": "reports/brief.md", "text": "summary: keep"}
+        ],
+        "required_policy_risk_flag_any": ["delete"],
+        "required_experience_status_any": ["permission_denied"],
+        "required_failure_layer_any": ["permission"],
+        "required_intake_task_type_any": ["information_synthesis"],
+        "required_intake_risk_level_any": ["high"],
+        "required_intake_tool_any": ["builtin.file.basic"],
+        "required_intake_validation_strategy_any": ["completion_evaluation"],
+        "required_intake_confirmation_required": true
+      }
+    },
+    {
+      "id": "general_agent_usability_document_generation_permission_boundary",
+      "kind": "task",
+      "category": "general_agent_usability",
+      "description": "General-agent document generation permission boundary blocks unapproved delete.",
+      "setup_files": {
+        "docs/draft.md": "# Draft\n"
+      },
+      "goal": "通用可用性文档生成权限边界：删除 docs/draft.md",
+      "expected_output": "The task must be blocked because delete permission is not granted.",
+      "executor": "file",
+      "payload": {
+        "action": "delete",
+        "path": "docs/draft.md"
+      },
+      "max_permission": "L2",
+      "timeout": 90,
+      "assertions": {
+        "must_not_succeed": true,
+        "file_contains": [
+          {"path": "docs/draft.md", "text": "# Draft"}
+        ],
+        "required_policy_risk_flag_any": ["delete"],
+        "required_experience_status_any": ["permission_denied"],
+        "required_failure_layer_any": ["permission"],
+        "required_intake_task_type_any": ["document_generation"],
+        "required_intake_risk_level_any": ["high"],
+        "required_intake_tool_any": ["builtin.file.basic"],
+        "required_intake_validation_strategy_any": ["artifact_file_check"],
+        "required_intake_confirmation_required": true
+      }
+    },
+    {
+      "id": "general_agent_usability_data_processing_permission_boundary",
+      "kind": "task",
+      "category": "general_agent_usability",
+      "description": "General-agent data processing permission boundary blocks unapproved delete.",
+      "setup_files": {
+        "reports/data.md": "total: 70\n"
+      },
+      "goal": "通用可用性数据处理权限边界：删除 reports/data.md",
+      "expected_output": "The task must be blocked because delete permission is not granted.",
+      "executor": "file",
+      "payload": {
+        "action": "delete",
+        "path": "reports/data.md"
+      },
+      "max_permission": "L2",
+      "timeout": 90,
+      "assertions": {
+        "must_not_succeed": true,
+        "file_contains": [
+          {"path": "reports/data.md", "text": "total: 70"}
+        ],
+        "required_policy_risk_flag_any": ["delete"],
+        "required_experience_status_any": ["permission_denied"],
+        "required_failure_layer_any": ["permission"],
+        "required_intake_task_type_any": ["data_processing"],
+        "required_intake_risk_level_any": ["high"],
+        "required_intake_tool_any": ["builtin.file.basic"],
+        "required_intake_validation_strategy_any": ["data_result_and_artifact_check"],
+        "required_intake_confirmation_required": true
+      }
+    },
+    {
+      "id": "general_agent_usability_web_information_permission_boundary",
+      "kind": "task",
+      "category": "general_agent_usability",
+      "description": "General-agent web information permission boundary blocks unapproved network access.",
+      "goal": "通用可用性网页信息获取权限边界：使用 HTTP 获取 https://example.com",
+      "expected_output": "The task must be blocked because network permission is not granted.",
+      "skill": "builtin.http.client",
+      "payload": {
+        "action": "get",
+        "url": "https://example.com"
+      },
+      "max_permission": "L2",
+      "timeout": 90,
+      "assertions": {
+        "must_not_succeed": true,
+        "required_policy_risk_flag_any": ["network"],
+        "required_experience_status_any": ["permission_denied"],
+        "required_failure_layer_any": ["permission"],
+        "required_intake_task_type_any": ["web_information"],
+        "required_intake_risk_level_any": ["medium"],
+        "required_intake_tool_any": ["builtin.http.client"],
+        "required_intake_validation_strategy_any": ["retrieved_content_check"],
+        "required_intake_confirmation_required": true
+      }
+    },
+    {
       "id": "git_status_readonly_report",
       "kind": "task",
       "category": "basecap_v1_git",

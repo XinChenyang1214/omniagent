@@ -1,6 +1,6 @@
 # Agent Usability and Learning Loop MVP（META-010）
 
-Last reviewed: 2026-06-16
+Last reviewed: 2026-06-22
 
 ## 文档状态
 
@@ -16,7 +16,9 @@ Last reviewed: 2026-06-16
 
 ## 目标
 
-把 OmniAgent 从 task-centric runtime 推进到 learning-loop-centered personal Agent OS 的最小可用版本。
+把 OmniAgent 从 task-centric runtime 推进到 learning-loop-centered general-purpose personal Agent OS 的最小可用版本。
+
+本 workstream 的实现和验收不应被解释为代码助手专用路线。开发维护任务可以作为早期高频场景，但目标能力必须能迁移到文件整理、信息归纳、文档生成、数据处理、网页信息获取、任务规划和轻量自动化等通用个人任务。
 
 首期不追求完整多入口、多 Agent 或生产化 UI，而是先证明一个核心闭环：
 
@@ -34,6 +36,7 @@ User goal
 用户可感知的结果：
 
 - Agent 能维护当前目标、项目状态、用户偏好和自身能力边界。
+- Agent 能先识别任务类型、风险等级、所需工具和验证方式，而不是默认进入代码修改流程。
 - 每次任务结束后都有结构化 experience record。
 - 重复任务能先命中 procedure memory，而不是每次重新完整规划。
 - 学习升级必须基于 evidence，不允许把一次偶然成功直接升级成 skill。
@@ -68,6 +71,7 @@ User goal
 | Agent 有稳定 self model，知道能力边界和不确定性 | `AgentProfile` / `CapabilitySelfModel` | `workspace/agent_state/agent_profile.json`；`AGENT_STATE.md` 摘要进入 bootstrap documents | implemented |
 | 用户偏好是一等输入 | `UserPreference` typed memory | 偏好写入、读取、禁用测试；任务上下文能注入偏好摘要且排除 disabled preference | implemented |
 | 项目状态是一等输入 | `ProjectState` typed memory | `workspace/agent_state/project_state.json` 可从项目文档建立当前 workstream 和权威文档列表 | implemented |
+| Agent 执行前能识别任务类型、风险、工具和验证方式 | `TaskIntakeAssessment` artifact | `src/omniagent/task_intake.py`；每个任务写 `workspace/tasks/<task_id>/plan/intake_assessment.json`；runtime 在正式 `task.created` 前发布 `task.intake_assessed`，CLI 非 JSON 事件流提前输出 `任务预判`，结束摘要也包含同一 intake；real-world eval runner 收集 `task_intake_assessments` 并支持 intake / experience / policy risk / LLM prompt 断言；`tests/test_task_intake.py` 与 `tests/test_real_world_eval_diagnostics.py::test_task_intake_assertions_use_collected_assessment` 覆盖；`general_agent_usability_*` 首批 5 类学习序列、5 个自然语言 tool-choice 场景和 5 个权限边界场景已加入，通过 `--check-only`，并在离线 `OMNIAGENT_LLM_PROVIDER=test` 基线下跑通 | verified_offline |
 | 每次任务结束后记录 experience | `ExperienceRecord` schema and writer | runtime success / failure / permission denied 路径写 record；包含 goal、actions、artifacts、validation、failure attribution | implemented |
 | 学习发生在验证之后 | `LearningEngine` promotion gate | `ExperienceRecord` 只在 `validation.verdict = passed` 时生成需审核的 procedure candidate；未验证、partial、failed 或缺少 evidence 的记录不生成 procedure draft；`tests/test_experience_record.py::ExperienceRecordIntegrationTest::test_success_without_validation_does_not_create_procedure_candidate` 和 `tests/test_procedure_memory.py::ProcedureMemoryStoreTest::test_extract_draft_requires_passed_validation_with_evidence` 覆盖该 gate | implemented |
 | 经验可提炼成 procedure draft | `ProcedureDraft` model and extractor | 从 passed `ExperienceRecord` 生成 draft；包含 trigger、steps、outputs、validator、risk 和 source experience lineage | implemented |

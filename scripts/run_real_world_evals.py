@@ -585,6 +585,8 @@ def _collect_evidence(
         "policy_decisions": [],
         "request_payload_stats": [],
         "llm_calls": [],
+        "task_intake_assessments": [],
+        "experience_records": [],
         "learning_feedbacks": [],
         "learning_corrections": [],
     }
@@ -621,6 +623,14 @@ def _collect_evidence(
                         "risk_flags": policy_payload.get("risk_flags", {}),
                         "context_budget": policy_payload.get("context_budget", {}),
                     }
+                )
+
+        intake_path = task_dir / "plan" / "intake_assessment.json"
+        if intake_path.exists():
+            intake_payload = _load_json(intake_path)
+            if isinstance(intake_payload, dict):
+                evidence["task_intake_assessments"].append(
+                    _summarize_task_intake_assessment(task_id, intake_payload)
                 )
 
         graph_path = task_dir / "plan" / "final_task_graph.json"
@@ -688,6 +698,14 @@ def _collect_evidence(
             if isinstance(completion, dict):
                 evidence["completion_evaluations"].append(
                     _summarize_completion_evaluation(task_id, completion)
+                )
+
+        experience_path = task_dir / "experience" / "experience_record.json"
+        if experience_path.exists():
+            experience = _load_json(experience_path)
+            if isinstance(experience, dict):
+                evidence["experience_records"].append(
+                    _summarize_experience_record(task_id, experience)
                 )
 
         feedback_path = task_dir / "learning" / "feedback.json"
@@ -842,6 +860,38 @@ def _summarize_learning_correction(task_id: str, payload: dict[str, Any]) -> dic
         "evidence_refs": _string_values(payload.get("evidence_refs")),
         "reason": payload.get("reason"),
         "next_action_count": len(payload.get("next_actions") or []),
+    }
+
+
+def _summarize_task_intake_assessment(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "task_id": task_id,
+        "schema_version": payload.get("schema_version"),
+        "task_type": payload.get("task_type"),
+        "task_type_signals": _string_values(payload.get("task_type_signals")),
+        "risk_level": payload.get("risk_level"),
+        "risk_reasons": _string_values(payload.get("risk_reasons")),
+        "tools": _string_values(payload.get("tools")),
+        "validation_strategy": payload.get("validation_strategy"),
+        "validation_targets": _string_values(payload.get("validation_targets")),
+        "confirmation_required": payload.get("confirmation_required"),
+        "confirmation_reasons": _string_values(payload.get("confirmation_reasons")),
+    }
+
+
+def _summarize_experience_record(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    validation = payload.get("validation") if isinstance(payload.get("validation"), dict) else {}
+    failure = payload.get("failure") if isinstance(payload.get("failure"), dict) else {}
+    return {
+        "task_id": task_id,
+        "schema_version": payload.get("schema_version"),
+        "experience_id": payload.get("experience_id"),
+        "status": payload.get("status"),
+        "validation_verdict": validation.get("verdict"),
+        "failure_layer": failure.get("failure_layer"),
+        "error_code": failure.get("error_code"),
+        "permission": failure.get("permission"),
+        "learnable": payload.get("learnable"),
     }
 
 
@@ -1222,6 +1272,64 @@ def _write_case_diagnostics(
             _markdown_table(
                 ["Task", "Decision", "Skipped", "Fallback", "Risk Flags", "Reason"],
                 rows,
+            )
+        )
+        lines.append("")
+
+    if evidence.get("task_intake_assessments"):
+        lines.extend(["## Task Intake Assessment", ""])
+        lines.extend(
+            _markdown_table(
+                [
+                    "Task",
+                    "Type",
+                    "Risk",
+                    "Tools",
+                    "Validation",
+                    "Confirm",
+                    "Reasons",
+                ],
+                [
+                    [
+                        item.get("task_id"),
+                        item.get("task_type"),
+                        item.get("risk_level"),
+                        ", ".join(item.get("tools") or []) or "-",
+                        item.get("validation_strategy"),
+                        item.get("confirmation_required"),
+                        ", ".join(item.get("confirmation_reasons") or []) or "-",
+                    ]
+                    for item in evidence.get("task_intake_assessments", [])
+                ],
+            )
+        )
+        lines.append("")
+
+    if evidence.get("experience_records"):
+        lines.extend(["## Experience Records", ""])
+        lines.extend(
+            _markdown_table(
+                [
+                    "Task",
+                    "Experience",
+                    "Status",
+                    "Validation",
+                    "Failure Layer",
+                    "Error",
+                    "Permission",
+                ],
+                [
+                    [
+                        item.get("task_id"),
+                        item.get("experience_id"),
+                        item.get("status"),
+                        item.get("validation_verdict"),
+                        item.get("failure_layer"),
+                        item.get("error_code"),
+                        item.get("permission") or "-",
+                    ]
+                    for item in evidence.get("experience_records", [])
+                ],
             )
         )
         lines.append("")
@@ -1872,6 +1980,18 @@ def _evaluate_assertions(
     max_llm_calls = assertions.get("max_llm_calls")
     if max_llm_calls is not None and len(evidence.get("llm_calls", [])) > int(max_llm_calls):
         issues.append(f"too many LLM calls: {len(evidence.get('llm_calls', []))} > {max_llm_calls}")
+    required_llm_prompts = {str(item) for item in assertions.get("required_llm_prompt_any", [])}
+    if required_llm_prompts:
+        seen_prompts = {
+            str(item.get("prompt_name"))
+            for item in evidence.get("llm_calls", [])
+            if item.get("prompt_name") is not None
+        }
+        if not (required_llm_prompts & seen_prompts):
+            issues.append(
+                "missing required LLM prompt; expected any of "
+                f"{sorted(required_llm_prompts)}, got {sorted(seen_prompts)}"
+            )
 
     vector_matches = evidence.get("vector_matches", [])
     min_vector_match_count = assertions.get("min_vector_match_count")
@@ -1956,6 +2076,130 @@ def _evaluate_assertions(
             issues.append(
                 "missing required policy decision; expected any of "
                 f"{sorted(required_policy_decisions)}, got {sorted(seen_policy_decisions)}"
+            )
+
+    required_policy_risk_flags = {
+        str(item) for item in assertions.get("required_policy_risk_flag_any", [])
+    }
+    if required_policy_risk_flags:
+        seen_policy_risk_flags = {
+            str(name)
+            for item in evidence.get("policy_decisions", [])
+            for name, enabled in (
+                item.get("risk_flags") if isinstance(item.get("risk_flags"), dict) else {}
+            ).items()
+            if enabled
+        }
+        if not (required_policy_risk_flags & seen_policy_risk_flags):
+            issues.append(
+                "missing required policy risk flag; expected any of "
+                f"{sorted(required_policy_risk_flags)}, got {sorted(seen_policy_risk_flags)}"
+            )
+
+    experience_records = [
+        item for item in evidence.get("experience_records", []) if isinstance(item, dict)
+    ]
+    experience_statuses = [
+        str(item.get("status"))
+        for item in experience_records
+        if item.get("status") is not None
+    ]
+    _assert_required_any(
+        label="experience status",
+        expected={str(item) for item in assertions.get("required_experience_status_any", [])},
+        observed=experience_statuses,
+        issues=issues,
+    )
+    _assert_required_all(
+        label="experience statuses",
+        expected={str(item) for item in assertions.get("required_experience_status_all", [])},
+        observed=experience_statuses,
+        issues=issues,
+    )
+
+    intake_assessments = [
+        item for item in evidence.get("task_intake_assessments", []) if isinstance(item, dict)
+    ]
+    intake_task_types = [
+        str(item.get("task_type"))
+        for item in intake_assessments
+        if item.get("task_type") is not None
+    ]
+    _assert_required_any(
+        label="task intake type",
+        expected={str(item) for item in assertions.get("required_intake_task_type_any", [])},
+        observed=intake_task_types,
+        issues=issues,
+    )
+    _assert_required_all(
+        label="task intake types",
+        expected={str(item) for item in assertions.get("required_intake_task_type_all", [])},
+        observed=intake_task_types,
+        issues=issues,
+    )
+    intake_risk_levels = [
+        str(item.get("risk_level"))
+        for item in intake_assessments
+        if item.get("risk_level") is not None
+    ]
+    _assert_required_any(
+        label="task intake risk level",
+        expected={str(item) for item in assertions.get("required_intake_risk_level_any", [])},
+        observed=intake_risk_levels,
+        issues=issues,
+    )
+    _assert_required_all(
+        label="task intake risk levels",
+        expected={str(item) for item in assertions.get("required_intake_risk_level_all", [])},
+        observed=intake_risk_levels,
+        issues=issues,
+    )
+    intake_tools: list[str] = []
+    for item in intake_assessments:
+        intake_tools.extend(str(tool) for tool in item.get("tools") or [])
+    _assert_required_any(
+        label="task intake tool",
+        expected={str(item) for item in assertions.get("required_intake_tool_any", [])},
+        observed=intake_tools,
+        issues=issues,
+    )
+    _assert_required_all(
+        label="task intake tools",
+        expected={str(item) for item in assertions.get("required_intake_tool_all", [])},
+        observed=intake_tools,
+        issues=issues,
+    )
+    intake_validation_strategies = [
+        str(item.get("validation_strategy"))
+        for item in intake_assessments
+        if item.get("validation_strategy") is not None
+    ]
+    _assert_required_any(
+        label="task intake validation strategy",
+        expected={
+            str(item) for item in assertions.get("required_intake_validation_strategy_any", [])
+        },
+        observed=intake_validation_strategies,
+        issues=issues,
+    )
+    _assert_required_all(
+        label="task intake validation strategies",
+        expected={
+            str(item) for item in assertions.get("required_intake_validation_strategy_all", [])
+        },
+        observed=intake_validation_strategies,
+        issues=issues,
+    )
+    if "required_intake_confirmation_required" in assertions:
+        expected_confirmation = bool(assertions["required_intake_confirmation_required"])
+        if not any(
+            item.get("confirmation_required") is expected_confirmation
+            for item in intake_assessments
+        ):
+            issues.append(
+                "missing required task intake confirmation_required="
+                f"{expected_confirmation}; got "
+                f"{[item.get('confirmation_required') for item in intake_assessments]}"
             )
 
     learning_feedbacks = [
@@ -2210,6 +2454,18 @@ def _diagnose(issues: list[str], executions: list[dict[str, Any]], evidence: dic
         return "permission_detection"
     denied = [item for item in evidence.get("permissions", []) if item.get("status") == "denied"]
     if denied:
+        return "permission_policy_or_scenario_config"
+    if any(
+        item.get("status") == "permission_denied"
+        for item in evidence.get("experience_records", [])
+        if isinstance(item, dict)
+    ):
+        return "permission_policy_or_scenario_config"
+    if any(
+        item.get("experience_status") == "permission_denied"
+        for item in evidence.get("learning_feedbacks", [])
+        if isinstance(item, dict)
+    ):
         return "permission_policy_or_scenario_config"
     failed_nodes = [
         item for item in evidence.get("node_statuses", []) if item.get("status") == "failed"

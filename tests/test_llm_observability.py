@@ -74,6 +74,25 @@ class StubAdapterObservabilityFieldsTest(unittest.TestCase):
             )
         self.assertEqual(adapter.call_count, 3)
 
+    def test_planner_can_select_csv_skill_from_natural_language(self) -> None:
+        adapter = StubLLMAdapter()
+        response = adapter.generate_structured(
+            prompt_name="planner_v1",
+            system_prompt="test",
+            request_payload={
+                "task_request": {
+                    "goal": "Sum revenue from inputs/sales.csv and write reports/sales.md.",
+                    "executor": "auto",
+                    "payload": {},
+                }
+            },
+            schema={"type": "object"},
+        )
+        nodes = response.structured_output["graph"]["nodes"]
+        self.assertEqual(nodes[0]["skill_name"], "builtin.data.csv")
+        self.assertEqual(nodes[0]["input_payload"]["action"], "report")
+        self.assertEqual(nodes[0]["input_payload"]["path"], "inputs/sales.csv")
+
 
 # ---------------------------------------------------------------------------
 # Workspace persistence (task dir + thread dir)

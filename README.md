@@ -1,11 +1,13 @@
 # OmniAgent
 
-OmniAgent 当前代码基础是一个以 **task** 为中心的本地嵌入式 Agent Runtime。自 2026-06-11 起，项目按 [`docs/product-architecture.md`](./docs/product-architecture.md) 重新开发为以学习循环为中心的个人 Agent OS；现有 runtime 将作为 Execution Runtime 下沉复用。
+OmniAgent 当前代码基础是一个以 **task** 为中心的本地嵌入式 Agent Runtime。自 2026-06-11 起，项目按 [`docs/product-architecture.md`](./docs/product-architecture.md) 重新开发为以学习循环为中心的通用个人 Agent OS；现有 runtime 将作为 Execution Runtime 下沉复用。
+
+项目目标是通用能力 Agent，而不是代码助手或单一开发工具。早期实现以单用户、本地、CLI 优先的技术用户场景切入，但长期能力应覆盖文件整理、信息归纳、文档生成、数据处理、网页信息获取、任务规划、轻量自动化和开发维护等多类个人任务。
 
 - **单用户、单机、CLI 优先**
-- **面向开发者**，可调试、可审计、可演化
+- **面向技术用户的通用任务**，可调试、可审计、可演化
 - **轻量本地运行时**（stdlib 核心 + 默认本地 embedding 依赖 + OpenAI 兼容 LLM）
-- **LLM 驱动**的规划、评估、对话路由、代码合成
+- **LLM 驱动**的规划、评估、对话路由、内容生成、代码合成和工具选择
 
 ## 当前代码能力
 
@@ -341,4 +343,8 @@ workspace/
 
 ## 当前状态
 
-代码层面仍保留三阶段 MVP、P0 补丁轮、`BASECAP-001`、`BASECAP-002`、`REAL-EVAL-005`、`CAP-EVAL-001` 和 `META-009` 首轮落地结果作为旧实现基础；相关过程文档已归档到 [`docs/archive/pre-product-redesign/`](./docs/archive/pre-product-redesign/)。当前开发主线是 [`META-010` Agent usability and learning loop MVP](./docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md)。Phase 1 Agent state、Phase 2 Experience records、Phase 3 Procedure memory、Phase 4 Habit fast path、Phase 5 Skill promotion、Phase 6 Learning feedback 和 Phase 7 Learning correction 已实现；learning-loop 真实评测 case、learning feedback task-ending reply、learning correction artifact / frozen reuse / fresh evidence restore、procedure edit / review、统一 learning review / show / history / explain-match / edit / promote / validate / decay / request-changes / approve / reject / disable / enable / rollback 入口、experience review、habit review、skill validation / approval / rejection / disable / enable / rollback、跨 eval evidence index、evidence index scenario / category / requires / skip-reason / permission / completion-layer / policy-decision / skipped-stage / policy-risk-flag / policy-reason / policy-context-budget / request-payload-stats / node-status / critic-action / memory-retrieval / llm-usage / promotion-generation-type / promotion-source-target / learning-kind / learning-validation / skill-validation / review-decision / audit-event 查询视图、evidence dashboard regression commands（含 eval-coverage / scenario / used-skill / procedure-id / habit-id / lineage-skill / promotion-generation-type / promotion-source-target / permission-summary / policy-reason / policy-context-budget-hotspot / request-payload-stats-hotspot / learning-kind / learning-validation / skill-validation / review-decision / audit-event 动态查询）/ eval coverage / skipped eval / model capability / node execution / critic action / completion evaluation / memory retrieval / LLM usage / runtime cost hotspot / execution policy / Planner skipped / policy risk flag / policy reason / policy context budget / request payload stats / permission governance / habit fast path / learning match explanation / learning gate / learning feedback / learning correction / learning governance / learning history / learning approval / learning promotion / learning validation / learning edit / learning request-changes / learning decay / learning disable / learning restore / learning rollback / learning rejection / learning audit gap / skill lifecycle governance / skill promotion coverage / skill approval gate 视图、JSON / JSONL data habit promotion、active generated habit direct execute、CSV / TSV data habit promotion、SQLite data habit promotion、config / YAML / XML / dotenv / INI / properties habit promotion、plain text habit promotion、markdown habit promotion、HTML habit promotion、archive / tar.gz habit promotion、datetime habit promotion、read-only Git habit promotion（手动审批）、Python habit promotion（手动审批）、HTTP habit promotion（手动审批）、browser fetch habit promotion（手动审批）和 safe shell habit promotion（手动审批）已补齐，下一步是按真实稳定 habit 继续扩展 skill promotion 类型、继续扩展学习治理入口，并继续把 evidence dashboard 接入更多回归消费入口。
+代码层面仍保留三阶段 MVP、P0 补丁轮、`BASECAP-001`、`BASECAP-002`、`REAL-EVAL-005`、`CAP-EVAL-001` 和 `META-009` 首轮落地结果作为旧实现基础；相关过程文档已归档到 [`docs/archive/pre-product-redesign/`](./docs/archive/pre-product-redesign/)。
+
+当前开发主线是 [`META-010` Agent usability and learning loop MVP](./docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md)。Phase 1 Agent state、Phase 2 Experience records、Phase 3 Procedure memory、Phase 4 Habit fast path、Phase 5 Skill promotion、Phase 6 Learning feedback 和 Phase 7 Learning correction 已实现，学习反馈、学习纠错、治理入口、evidence index 和 evidence dashboard 已形成第一轮学习闭环。当前新增了 `TaskIntakeAssessment`，任务执行前会记录任务类型、风险等级、候选工具、验证方式和是否需要确认，写入 `workspace/tasks/<task_id>/plan/intake_assessment.json`，并通过 CLI 非 JSON 事件流提前输出 `任务预判`。
+
+下一步是推进通用 Agent 初步可用版：用多类真实个人任务验证目标理解、风险判断、工具选择、执行验证、记忆复用和学习纠错，而不是把开发维护任务或 skill 类型扩展当成产品边界。首批 `general_agent_usability_*` 场景覆盖文件整理、信息归纳、文档生成、数据处理和网页信息获取 5 类任务，并为每类补了学习序列、自然语言 tool-choice 和独立权限边界场景，已通过 `scripts/run_real_world_evals.py --check-only`；离线 `OMNIAGENT_LLM_PROVIDER=test` 执行基线已在 `eval_runs/general_agent_usability_offline_latest/` 下跑通，真实 LLM provider 基线仍待建立。

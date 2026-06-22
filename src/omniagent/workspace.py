@@ -310,6 +310,9 @@ class TaskArtifactManager:
     def write_policy_decision(self, task_dir: Path, decision: dict[str, Any]) -> None:
         _write_json(task_dir / "plan" / "policy_decision.json", decision)
 
+    def write_intake_assessment(self, task_dir: Path, assessment: dict[str, Any]) -> None:
+        _write_json(task_dir / "plan" / "intake_assessment.json", assessment)
+
     def write_procedure_match(self, task_dir: Path, match: dict[str, Any]) -> None:
         _write_json(task_dir / "procedure" / "procedure_match.json", match)
 

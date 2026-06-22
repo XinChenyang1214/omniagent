@@ -252,6 +252,114 @@ def test_expected_permission_denial_can_assert_diagnosis_layer(tmp_path: Path) -
     assert diagnosis == "permission_policy_or_scenario_config"
 
 
+def test_task_intake_assertions_use_collected_assessment(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    scenario = {
+        "id": "general_intake",
+        "assertions": {
+            "required_intake_task_type_any": ["file_organization"],
+            "required_intake_risk_level_any": ["low"],
+            "required_intake_tool_any": ["builtin.file.basic"],
+            "required_intake_validation_strategy_any": ["artifact_file_check"],
+            "required_intake_confirmation_required": False,
+            "required_experience_status_any": ["succeeded"],
+            "required_policy_risk_flag_any": ["delete"],
+            "required_llm_prompt_any": ["planner_v1"],
+        },
+    }
+    executions = [{"json": {"result": {"success": True}}, "timed_out": False}]
+    evidence = {
+        "experience_records": [
+            {
+                "task_id": "task_intake",
+                "experience_id": "exp_intake",
+                "status": "succeeded",
+            }
+        ],
+        "policy_decisions": [
+            {
+                "task_id": "task_intake",
+                "policy_decision": "plan_required",
+                "risk_flags": {"delete": True},
+            }
+        ],
+        "task_intake_assessments": [
+            {
+                "task_id": "task_intake",
+                "task_type": "file_organization",
+                "risk_level": "low",
+                "tools": ["builtin.file.basic"],
+                "validation_strategy": "artifact_file_check",
+                "confirmation_required": False,
+            }
+        ],
+        "llm_calls": [{"prompt_name": "planner_v1"}],
+        "permissions": [],
+        "node_statuses": [],
+        "completion_evaluations": [],
+    }
+
+    passed, issues, diagnosis = evals._evaluate_assertions(
+        scenario=scenario,
+        workspace=workspace,
+        executions=executions,
+        evidence=evidence,
+    )
+
+    assert passed is True
+    assert issues == []
+    assert diagnosis == "passed"
+
+
+def test_permission_denied_experience_drives_permission_diagnosis(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    scenario = {
+        "id": "general_permission_boundary",
+        "assertions": {
+            "must_not_succeed": True,
+            "required_experience_status_any": ["permission_denied"],
+            "required_policy_risk_flag_any": ["delete"],
+            "required_failure_layer_any": ["permission"],
+        },
+    }
+    executions = [{"json": {"result": {"success": False}}, "timed_out": False}]
+    evidence = {
+        "experience_records": [
+            {
+                "task_id": "task_permission",
+                "experience_id": "exp_permission",
+                "status": "permission_denied",
+                "failure_layer": "permission",
+                "error_code": "permission_denied",
+                "permission": "filesystem.delete",
+            }
+        ],
+        "policy_decisions": [
+            {
+                "task_id": "task_permission",
+                "policy_decision": "plan_required",
+                "risk_flags": {"delete": True},
+            }
+        ],
+        "permissions": [],
+        "node_statuses": [],
+        "completion_evaluations": [],
+    }
+
+    passed, issues, diagnosis = evals._evaluate_assertions(
+        scenario=scenario,
+        workspace=workspace,
+        executions=executions,
+        evidence=evidence,
+    )
+
+    assert passed is True
+    assert issues == []
+    assert diagnosis == "permission_policy_or_scenario_config"
+
+
 def test_assertions_detect_forbidden_skill_and_workspace_glob(tmp_path: Path) -> None:
     (tmp_path / "reports").mkdir()
     (tmp_path / "reports" / "out.md").write_text("ok", encoding="utf-8")

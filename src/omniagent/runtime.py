@@ -42,6 +42,7 @@ from omniagent.procedure_memory import ProcedureMemoryStore
 from omniagent.skill_registry import filter_skill_registry_entries_for_planner
 from omniagent.skill_lifecycle import SkillLifecycleManager
 from omniagent.storage import SQLiteStore
+from omniagent.task_intake import assess_task_intake
 from omniagent.workflow_compiler import WorkflowCompiler
 from omniagent.workspace import TaskArtifactManager, WorkspaceManager
 
@@ -139,6 +140,10 @@ class EmbeddedRuntime:
         skill_registry_entries: list[dict[str, Any]],
     ) -> TaskExecutionReport:
         context_bundle = self._build_context_bundle(request)
+        context_bundle["intake_assessment"] = assess_task_intake(
+            request,
+            skill_registry_entries=skill_registry_entries,
+        )
         workspace_paths = context_bundle["workspace_paths"]
         bootstrap = context_bundle["bootstrap"]
         workflow_summaries = context_bundle["workflow_summaries"]
@@ -161,6 +166,29 @@ class EmbeddedRuntime:
         self.store.create_task(task)
         self.graph_memory.record_task(task)
         task_dir = self.artifact_manager.initialize_task(task, request, bootstrap)
+        self.artifact_manager.write_intake_assessment(
+            task_dir,
+            context_bundle["intake_assessment"],
+        )
+        intake_assessment = dict(context_bundle["intake_assessment"])
+        self._emit(
+            event_bus,
+            task.task_id,
+            "task.intake_assessed",
+            task.status,
+            {
+                "task_type": intake_assessment.get("task_type"),
+                "risk_level": intake_assessment.get("risk_level"),
+                "tools": list(intake_assessment.get("tools") or []),
+                "validation_strategy": intake_assessment.get("validation_strategy"),
+                "confirmation_required": bool(
+                    intake_assessment.get("confirmation_required", False)
+                ),
+                "confirmation_reasons": list(
+                    intake_assessment.get("confirmation_reasons") or []
+                ),
+            },
+        )
         self.artifact_manager.write_procedure_match(
             task_dir,
             context_bundle["procedure_match"],
@@ -428,6 +456,7 @@ class EmbeddedRuntime:
             events=events,
             task_graph=None,
             critic_verdicts=[],
+            intake_assessment=dict(context_bundle.get("intake_assessment") or {}),
         )
 
     def _finalize_non_plan_decision(
@@ -582,6 +611,7 @@ class EmbeddedRuntime:
             events=events,
             task_graph=empty_graph,
             critic_verdicts=[],
+            intake_assessment=dict(context_bundle.get("intake_assessment") or {}),
         )
 
     def resume(
@@ -615,6 +645,33 @@ class EmbeddedRuntime:
         task_dir = self.artifact_manager.task_dir(task.task_id)
         self.artifact_manager.write_request_snapshot(task_dir, request)
         context_bundle = self._build_context_bundle(request)
+        context_bundle["intake_assessment"] = assess_task_intake(
+            request,
+            skill_registry_entries=skill_registry_entries,
+        )
+        self.artifact_manager.write_intake_assessment(
+            task_dir,
+            context_bundle["intake_assessment"],
+        )
+        intake_assessment = dict(context_bundle["intake_assessment"])
+        self._emit(
+            event_bus,
+            task.task_id,
+            "task.intake_assessed",
+            task.status,
+            {
+                "task_type": intake_assessment.get("task_type"),
+                "risk_level": intake_assessment.get("risk_level"),
+                "tools": list(intake_assessment.get("tools") or []),
+                "validation_strategy": intake_assessment.get("validation_strategy"),
+                "confirmation_required": bool(
+                    intake_assessment.get("confirmation_required", False)
+                ),
+                "confirmation_reasons": list(
+                    intake_assessment.get("confirmation_reasons") or []
+                ),
+            },
+        )
         self.artifact_manager.write_procedure_match(
             task_dir,
             context_bundle["procedure_match"],
@@ -992,6 +1049,7 @@ class EmbeddedRuntime:
             task_graph=task_graph,
             critic_verdicts=critic_verdicts,
             completion_evaluation=completion_evaluation,
+            intake_assessment=dict(context_bundle.get("intake_assessment") or {}),
         )
 
     def _write_experience_record(

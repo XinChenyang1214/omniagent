@@ -1,6 +1,6 @@
 # 文档登记表
 
-Last reviewed：2026-06-16
+Last reviewed：2026-06-22
 
 本登记表记录文档治理状态。`implementation_status` 反映本次整理时文档中记载的项目状态；除非特别说明，它不是一次新的代码审计结论。
 
@@ -27,8 +27,8 @@ Last reviewed：2026-06-16
 | `README.md` | current-state / entry | project overview | active | not_applicable | 公开入口、安装、快速开始、workspace 结构、当前状态摘要 | none |
 | `docs/README.md` | current-state / operations | document governance | active | not_applicable | 文档阅读顺序和更新规则 | none |
 | `docs/doc-registry.md` | current-state / registry | document governance | active | not_applicable | 文档权威边界、生命周期状态和替代关系 | none |
-| `docs/product-architecture.md` | architecture / product strategy | smart learning agent redesign | active | not_started | 目标产品架构、设计思想、学习闭环和后续路线取舍 | none |
-| `docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md` | implementation / architecture | `META-010` | confirmed | implementing | 按最新产品架构重开发的首个开发契约、验收矩阵和阶段计划 | none |
+| `docs/product-architecture.md` | architecture / product strategy | smart learning agent redesign | active | not_started | 通用个人 Agent OS 的目标产品架构、设计思想、学习闭环和后续路线取舍 | none |
+| `docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md` | implementation / architecture | `META-010` | confirmed | implementing | 按通用个人 Agent OS 架构重开发的首个开发契约、验收矩阵和阶段计划 | none |
 | `docs/specs/agent-state.md` | spec | `META-010` / Agent state | confirmed | implemented | `AgentProfile`、`UserPreference`、`ProjectState`、`CurrentGoal` 的最小数据契约和验收标准 | none |
 | `docs/specs/experience-record.md` | spec | `META-010` / Experience records | confirmed | implemented | 任务经验记录的 schema、写入时机、evidence 和 promotion gate 边界 | none |
 | `docs/specs/procedure-memory.md` | spec | `META-010` / Procedure memory | confirmed | implemented | procedure / verified procedure / habit 的生命周期、存储、检索、升级规则和 Phase 4 habit fast path；skill promotion 归 Phase 5 | none |
@@ -82,6 +82,8 @@ Last reviewed：2026-06-16
 - 2026-06-12 已实现 Phase 1 Agent state、Phase 2 Experience records、Phase 3 Procedure memory、Phase 4 Habit fast path 和 Phase 5 Skill promotion；下一步进入 learning-loop 真实评测与治理增强。
 - 2026-06-15 新增并验证 Learning feedback spec，用于把已有学习闭环状态呈现在 task-ending reply 中，提高用户可感知性；`learning_loop_feedback_sequence` 已把连续任务学习反馈接入 evidence index / dashboard。
 - 2026-06-16 新增并验证 Learning correction spec，用于约束复用失败后的降级、冻结、解释、fresh evidence 复审恢复和 dashboard evidence；`learning_loop_correction_recovery` 已把纠错闭环接入 `learning_corrections` evidence kind。
+- 2026-06-22 明确产品目标为通用能力 Agent，不是代码助手或单一开发工具；README、产品架构、ROADMAP 和 `META-010` workstream 已同步该定位。
+- 2026-06-22 新增 `TaskIntakeAssessment` 和首批 `general_agent_usability_*` 场景，用于验证通用任务的类型识别、风险判断、工具选择、验证策略、权限边界和学习复用/纠错闭环；当前 5 类学习序列、5 个自然语言 tool-choice 场景和 5 个权限边界场景已通过 `--check-only`，并在 `OMNIAGENT_LLM_PROVIDER=test` 离线基线下跑通，真实 LLM provider 基线待建立。
 
 ## 待确认治理项
 

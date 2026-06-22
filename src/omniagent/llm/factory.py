@@ -6,6 +6,7 @@ from omniagent.config import LLMConfig
 from omniagent.llm.base import LLMAdapter
 from omniagent.llm.openai_compatible_adapter import OpenAICompatibleAdapter
 from omniagent.llm.resilient_adapter import ResilientLLMAdapter
+from omniagent.llm.test_adapter import TestLLMAdapter
 
 # External test adapters can register here via register_test_provider().
 _custom_providers: dict[str, type[LLMAdapter]] = {}
@@ -20,6 +21,8 @@ def _build_provider(config: LLMConfig) -> LLMAdapter:
     provider = config.provider.lower()
     if provider in _custom_providers:
         return _custom_providers[provider](config)
+    if provider == "test":
+        return TestLLMAdapter(config)
     return OpenAICompatibleAdapter(config)
 
 

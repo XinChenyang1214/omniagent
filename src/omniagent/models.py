@@ -1408,6 +1408,7 @@ class TaskExecutionReport:
     task_graph: TaskGraph | None = None
     critic_verdicts: list[CriticVerdict] = field(default_factory=list)
     completion_evaluation: CompletionEvaluation | None = None
+    intake_assessment: dict[str, Any] = field(default_factory=dict)
     learning_feedback: dict[str, Any] = field(default_factory=dict)
 
 

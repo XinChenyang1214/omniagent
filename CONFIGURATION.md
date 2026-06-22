@@ -10,7 +10,7 @@ OmniAgent 支持两种配置方式：**配置文件** 和 **环境变量**。环
 
 ```toml
 [llm]
-provider = "openai"           # openai / deepseek / ark / ollama / 任意 OpenAI 兼容服务
+provider = "openai"           # openai / deepseek / ark / ollama / test / 任意 OpenAI 兼容服务
 model = "gpt-4o-mini"         # 模型名称
 api_base = ""                 # API 地址，留空使用 provider 默认
 temperature = 0.0
@@ -68,7 +68,7 @@ json_logs = true
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `OMNIAGENT_LLM_PROVIDER` | `openai` | Provider 名称，支持任意 OpenAI 兼容服务 |
+| `OMNIAGENT_LLM_PROVIDER` | `openai` | Provider 名称，支持任意 OpenAI 兼容服务；`test` 为本地确定性测试 adapter，不调用外部 LLM |
 | `OMNIAGENT_LLM_MODEL` | `""` | 模型名，如 `gpt-4o-mini` / `deepseek-chat` / `doubao-1-5-pro-32k-250115` |
 | `OMNIAGENT_LLM_API_KEY` | — | API Key，也会读取 `OPENAI_API_KEY` / `ARK_API_KEY` |
 | `OMNIAGENT_LLM_API_BASE` | — | API 地址，也会读取 `ARK_BASE_URL` / `ARK_API_BASE`。留空使用 `https://api.openai.com/v1`。自动补 `/chat/completions` 后缀 |
@@ -79,6 +79,8 @@ json_logs = true
 | `OMNIAGENT_LLM_ENABLE_RUNTIME_FALLBACK` | `true` | 启用运行时降级 |
 | `OMNIAGENT_LLM_VERIFY_ON_STARTUP` | `false` | 启动时执行 LLM 健康检查 |
 | `OMNIAGENT_PROMPT_DIR` | `src/omniagent/prompts/` | Prompt 模板目录 |
+
+`OMNIAGENT_LLM_PROVIDER=test` 只用于单元测试、CLI smoke test 和离线 real-world eval 基线。它会返回结构合法但非智能的确定性结果，可验证 runtime、权限、artifact、learning feedback 和 eval runner wiring；不要把它的通过结果当作真实 LLM 能力证明。
 
 ### Embedding 相关
 

@@ -43,6 +43,17 @@ def _to_builtin(value: Any) -> Any:
 
 def _format_event_line(event: TaskEvent) -> str:
     payload = event.payload or {}
+    if event.event_type == "task.intake_assessed":
+        tools = payload.get("tools") or []
+        tools_text = ", ".join(str(item) for item in tools) if tools else "none"
+        return (
+            "任务预判: "
+            f"type={payload.get('task_type')} | "
+            f"risk={payload.get('risk_level')} | "
+            f"tools={tools_text} | "
+            f"validation={payload.get('validation_strategy')} | "
+            f"confirmation_required={payload.get('confirmation_required')}"
+        )
     segments = [f"event: {event.event_type}", f"status={event.status}"]
     node_id = payload.get("node_id")
     if node_id:
@@ -1000,6 +1011,21 @@ def main(argv: list[str] | None = None) -> int:
             print(f"graph_id: {report.task.graph_id}")
             print(f"executor: {report.task.executor}")
             print(f"message: {report.result.message}")
+            if report.intake_assessment:
+                intake = report.intake_assessment
+                print("任务预判:")
+                print(f"- type: {intake.get('task_type')}")
+                print(f"- risk: {intake.get('risk_level')}")
+                print(
+                    "- tools: "
+                    + (
+                        ", ".join(str(item) for item in intake.get("tools", []))
+                        if intake.get("tools")
+                        else "none"
+                    )
+                )
+                print(f"- validation: {intake.get('validation_strategy')}")
+                print(f"- confirmation_required: {intake.get('confirmation_required')}")
             if report.task_graph is not None:
                 print("nodes:")
                 for node in report.task_graph.nodes:
