@@ -175,6 +175,7 @@ poetry run python scripts/run_real_world_evals.py --scenario-category general_ag
 真实 LLM provider 小基线建议先跑 5 个自然语言 tool-choice 场景；该命令会调用当前配置的真实 provider，执行前需要确认 token 成本和 provider / model 指向：
 
 ```bash
+poetry run python scripts/run_real_world_evals.py --scenario-category general_agent_usability --scenario-glob "general_agent_usability_*_tool_choice" --run-root eval_runs/general_agent_usability_real --dry-run
 poetry run python scripts/run_real_world_evals.py --scenario-category general_agent_usability --scenario-glob "general_agent_usability_*_tool_choice" --run-root eval_runs/general_agent_usability_real
 ```
 

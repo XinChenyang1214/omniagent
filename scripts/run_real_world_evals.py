@@ -174,6 +174,45 @@ def _matches_selector(value: str, selectors: list[str]) -> bool:
     return any(value == selector or fnmatch.fnmatchcase(value, selector) for selector in selectors)
 
 
+def _selection_result(
+    scenario: dict[str, Any],
+    *,
+    status: str,
+    skip_reason: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": scenario["id"],
+        "category": scenario.get("category", "uncategorized"),
+        "kind": scenario.get("kind", "task"),
+        "requires": scenario.get("requires", []),
+        "status": status,
+        "skip_reason": skip_reason,
+        "diagnosis": skip_reason or status,
+        "failure_layer": "none",
+        "issues": [],
+        "task_ids": [],
+        "thread_ids": [],
+    }
+
+
+def _select_scenarios(
+    scenarios: list[dict[str, Any]],
+    args: argparse.Namespace,
+    *,
+    include_not_selected: bool = False,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    selected: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
+    for scenario in scenarios:
+        reason = _scenario_skip_reason(scenario, args)
+        if reason:
+            if reason != "not selected" or include_not_selected:
+                results.append(_selection_result(scenario, status="skipped", skip_reason=reason))
+            continue
+        selected.append(scenario)
+    return selected, results
+
+
 def _prepare_workspace(run_dir: Path, scenario: dict[str, Any]) -> Path:
     workspace = run_dir / "workspaces" / str(scenario["id"])
     if workspace.exists():
@@ -2713,6 +2752,7 @@ def _write_summary(run_dir: Path, results: list[dict[str, Any]]) -> None:
     passed = sum(1 for item in results if item["status"] == "passed")
     failed = sum(1 for item in results if item["status"] == "failed")
     skipped = sum(1 for item in results if item["status"] == "skipped")
+    selected = sum(1 for item in results if item["status"] == "selected")
     summary = {
         "run_dir": str(run_dir),
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -2720,6 +2760,7 @@ def _write_summary(run_dir: Path, results: list[dict[str, Any]]) -> None:
         "passed": passed,
         "failed": failed,
         "skipped": skipped,
+        "selected": selected,
         "results": results,
     }
     _write_json(run_dir / "summary.json", summary)
@@ -2731,6 +2772,7 @@ def _write_summary(run_dir: Path, results: list[dict[str, Any]]) -> None:
         f"- passed: {passed}",
         f"- failed: {failed}",
         f"- skipped: {skipped}",
+        f"- selected: {selected}",
         "",
         "| Scenario | Status | Diagnosis | Failure Layer | Diagnostics | Evidence |",
         "|---|---|---|---|---|---|",
@@ -7042,6 +7084,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-complex", action="store_true", help="Include complex scenarios")
     parser.add_argument("--include-all", action="store_true", help="Include every scenario")
     parser.add_argument("--list", action="store_true", help="List scenarios and exit")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview selected and skipped scenarios without executing any task",
+    )
     parser.add_argument("--check-only", action="store_true", help="Validate scenario file and exit")
     parser.add_argument(
         "--build-evidence-index",
@@ -7491,33 +7538,23 @@ def main(argv: list[str] | None = None) -> int:
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     run_dir = run_root / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
-    selected: list[dict[str, Any]] = []
-    results: list[dict[str, Any]] = []
-    for scenario in scenarios:
-        reason = _scenario_skip_reason(scenario, args)
-        if reason:
-            if reason != "not selected":
-                results.append(
-                    {
-                        "id": scenario["id"],
-                        "category": scenario.get("category", "uncategorized"),
-                        "kind": scenario.get("kind", "task"),
-                        "requires": scenario.get("requires", []),
-                        "status": "skipped",
-                        "skip_reason": reason,
-                        "diagnosis": reason,
-                        "failure_layer": "none",
-                        "issues": [],
-                        "task_ids": [],
-                        "thread_ids": [],
-                    }
-                )
-            continue
-        selected.append(scenario)
+    selected, results = _select_scenarios(scenarios, args)
 
     if not selected:
         _write_summary(run_dir, results)
         print(f"no scenarios selected; summary: {run_dir / 'summary.md'}")
+        return 0
+
+    if args.dry_run:
+        preview_results = [
+            _selection_result(scenario, status="selected") for scenario in selected
+        ] + results
+        _write_summary(run_dir, preview_results)
+        print(f"dry_run: {run_dir / 'summary.md'}")
+        print(
+            f"selected={len(selected)} skipped={len(results)} "
+            "passed=0 failed=0 executed=0"
+        )
         return 0
 
     for scenario in selected:

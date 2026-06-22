@@ -758,6 +758,59 @@ def test_run_selection_supports_category_and_scenario_glob() -> None:
     assert evals._scenario_skip_reason(exact, Args()) is None
 
 
+def test_dry_run_writes_selection_summary_without_executing(tmp_path: Path, capsys) -> None:
+    scenario_path = tmp_path / "scenarios.json"
+    run_root = tmp_path / "runs"
+    scenario_path.write_text(
+        json.dumps(
+            {
+                "scenarios": [
+                    {
+                        "id": "general_agent_usability_file_organization_tool_choice",
+                        "category": "general_agent_usability",
+                        "kind": "task",
+                        "goal": "copy inputs/a.txt to outputs/a.txt",
+                    },
+                    {
+                        "id": "other_case",
+                        "category": "legacy",
+                        "kind": "task",
+                        "goal": "write reports/other.md",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = evals.main(
+        [
+            "--scenarios",
+            str(scenario_path),
+            "--run-root",
+            str(run_root),
+            "--scenario-category",
+            "general_agent_usability",
+            "--scenario-glob",
+            "*_tool_choice",
+            "--dry-run",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "selected=1" in output
+    assert "executed=0" in output
+    run_dirs = list(run_root.iterdir())
+    assert len(run_dirs) == 1
+    summary = json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
+    assert summary["selected"] == 1
+    assert summary["results"][0]["status"] == "selected"
+    assert summary["results"][0]["id"] == "general_agent_usability_file_organization_tool_choice"
+    assert not (run_dirs[0] / "workspaces").exists()
+
+
 def test_evidence_index_enriches_legacy_skipped_summary_with_scenario_metadata(
     tmp_path: Path,
 ) -> None:
