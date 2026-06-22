@@ -137,9 +137,7 @@ def _normalize_scenarios(path: Path) -> list[dict[str, Any]]:
 
 
 def _scenario_skip_reason(scenario: dict[str, Any], args: argparse.Namespace) -> str | None:
-    selected = set(args.scenario or [])
-    scenario_id = str(scenario["id"])
-    if selected and scenario_id not in selected:
+    if not _scenario_matches_run_selection(scenario, args):
         return "not selected"
     requires = {str(item).lower() for item in scenario.get("requires", [])}
     if "network" in requires and not (args.include_network or args.include_all):
@@ -153,6 +151,27 @@ def _scenario_skip_reason(scenario: dict[str, Any], args: argparse.Namespace) ->
     ):
         return "requires --include-l4"
     return None
+
+
+def _scenario_matches_run_selection(scenario: dict[str, Any], args: argparse.Namespace) -> bool:
+    exact_ids = set(_split_filter_values(getattr(args, "scenario", None)))
+    id_globs = _split_filter_values(getattr(args, "scenario_glob", None))
+    categories = _split_filter_values(getattr(args, "scenario_category", None))
+    if not (exact_ids or id_globs or categories):
+        return True
+
+    scenario_id = str(scenario["id"])
+    if scenario_id in exact_ids:
+        return True
+
+    category = str(scenario.get("category") or "uncategorized")
+    id_matches = True if not id_globs else _matches_selector(scenario_id, id_globs)
+    category_matches = True if not categories else _matches_selector(category, categories)
+    return (bool(id_globs) or bool(categories)) and id_matches and category_matches
+
+
+def _matches_selector(value: str, selectors: list[str]) -> bool:
+    return any(value == selector or fnmatch.fnmatchcase(value, selector) for selector in selectors)
 
 
 def _prepare_workspace(run_dir: Path, scenario: dict[str, Any]) -> Path:
@@ -7002,6 +7021,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scenarios", default=str(DEFAULT_SCENARIOS), help="Scenario JSON file")
     parser.add_argument("--run-root", default=str(DEFAULT_RUN_ROOT), help="Eval run output root")
     parser.add_argument("--scenario", action="append", help="Run only this scenario id")
+    parser.add_argument(
+        "--scenario-glob",
+        action="append",
+        help=(
+            "Run scenarios whose id matches this glob; can be repeated or comma-separated. "
+            "When combined with --scenario-category, both filters must match."
+        ),
+    )
+    parser.add_argument(
+        "--scenario-category",
+        action="append",
+        help=(
+            "Run scenarios whose category matches this value or glob; can be repeated or "
+            "comma-separated. When combined with --scenario-glob, both filters must match."
+        ),
+    )
     parser.add_argument("--include-network", action="store_true", help="Include network scenarios")
     parser.add_argument("--include-l4", action="store_true", help="Include L4 shell scenarios")
     parser.add_argument("--include-complex", action="store_true", help="Include complex scenarios")

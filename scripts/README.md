@@ -18,10 +18,11 @@ python3 scripts/run_real_world_evals.py --check-only
 python3 scripts/run_real_world_evals.py
 python3 scripts/run_real_world_evals.py --scenario csv_sales_summary
 OMNIAGENT_LLM_PROVIDER=test python3 scripts/run_real_world_evals.py --scenario general_agent_usability_file_organization
+OMNIAGENT_LLM_PROVIDER=test python3 scripts/run_real_world_evals.py --scenario-category general_agent_usability --scenario-glob "general_agent_usability_*_tool_choice"
 python3 scripts/run_real_world_evals.py --include-network
 python3 scripts/run_real_world_evals.py --include-l4
 ```
 
-`OMNIAGENT_LLM_PROVIDER=test` 可用于离线基线和回归调试，不调用外部 LLM；真实模型能力仍需使用实际 provider 单独验证。
+`--scenario-category` 可按 category 选择场景，`--scenario-glob` 可按场景 id glob 选择子集；两者同时使用时必须同时匹配。`OMNIAGENT_LLM_PROVIDER=test` 可用于离线基线和回归调试，不调用外部 LLM；真实模型能力仍需使用实际 provider 单独验证。
 
 场景定义见 [`../evals/real_world/scenarios.json`](../evals/real_world/scenarios.json)，流程说明见 [`../REAL_WORLD_EVAL_PLAN.md`](../REAL_WORLD_EVAL_PLAN.md)。

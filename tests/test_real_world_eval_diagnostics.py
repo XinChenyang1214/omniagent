@@ -711,6 +711,53 @@ def test_complex_scenarios_require_explicit_flag() -> None:
     assert evals._scenario_skip_reason(scenario, Args()) is None
 
 
+def test_run_selection_supports_category_and_scenario_glob() -> None:
+    class Args:
+        scenario = None
+        scenario_glob = None
+        scenario_category = None
+        include_network = False
+        include_l4 = False
+        include_complex = False
+        include_all = False
+
+    scenario = {
+        "id": "general_agent_usability_file_organization_tool_choice",
+        "category": "general_agent_usability",
+        "requires": [],
+        "max_permission": "L2",
+    }
+    other_category = {
+        "id": "general_agent_usability_file_organization_tool_choice",
+        "category": "legacy",
+        "requires": [],
+        "max_permission": "L2",
+    }
+    other_id = {
+        "id": "general_agent_usability_file_organization",
+        "category": "general_agent_usability",
+        "requires": [],
+        "max_permission": "L2",
+    }
+
+    Args.scenario_category = ["general_agent_usability"]
+    assert evals._scenario_skip_reason(scenario, Args()) is None
+    assert evals._scenario_skip_reason(other_category, Args()) == "not selected"
+
+    Args.scenario_glob = ["general_agent_usability_*_tool_choice"]
+    assert evals._scenario_skip_reason(scenario, Args()) is None
+    assert evals._scenario_skip_reason(other_id, Args()) == "not selected"
+
+    Args.scenario = ["exact_outside_category"]
+    exact = {
+        "id": "exact_outside_category",
+        "category": "legacy",
+        "requires": [],
+        "max_permission": "L2",
+    }
+    assert evals._scenario_skip_reason(exact, Args()) is None
+
+
 def test_evidence_index_enriches_legacy_skipped_summary_with_scenario_metadata(
     tmp_path: Path,
 ) -> None:
