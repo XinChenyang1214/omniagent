@@ -213,6 +213,18 @@ def _select_scenarios(
     return selected, results
 
 
+def _write_selection_preview(
+    *,
+    run_dir: Path,
+    selected: list[dict[str, Any]],
+    skipped_results: list[dict[str, Any]],
+) -> None:
+    preview_results = [
+        _selection_result(scenario, status="selected") for scenario in selected
+    ] + skipped_results
+    _write_summary(run_dir, preview_results)
+
+
 def _prepare_workspace(run_dir: Path, scenario: dict[str, Any]) -> Path:
     workspace = run_dir / "workspaces" / str(scenario["id"])
     if workspace.exists():
@@ -7089,6 +7101,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Preview selected and skipped scenarios without executing any task",
     )
+    parser.add_argument(
+        "--expect-selected-count",
+        type=int,
+        help="Fail before execution unless exactly this many scenarios are selected",
+    )
     parser.add_argument("--check-only", action="store_true", help="Validate scenario file and exit")
     parser.add_argument(
         "--build-evidence-index",
@@ -7377,6 +7394,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.expect_selected_count is not None and args.expect_selected_count < 0:
+        print("--expect-selected-count must be non-negative", file=sys.stderr)
+        return 2
     run_root = Path(args.run_root).resolve()
     evidence_index_payload: dict[str, Any] | None = None
     evidence_index_path: Path | None = None
@@ -7540,16 +7560,34 @@ def main(argv: list[str] | None = None) -> int:
     run_dir.mkdir(parents=True, exist_ok=False)
     selected, results = _select_scenarios(scenarios, args)
 
+    if (
+        args.expect_selected_count is not None
+        and len(selected) != args.expect_selected_count
+    ):
+        _write_selection_preview(
+            run_dir=run_dir,
+            selected=selected,
+            skipped_results=results,
+        )
+        print(
+            "selected_count_mismatch: "
+            f"expected={args.expect_selected_count} actual={len(selected)} "
+            f"summary={run_dir / 'summary.md'}",
+            file=sys.stderr,
+        )
+        return 2
+
     if not selected:
         _write_summary(run_dir, results)
         print(f"no scenarios selected; summary: {run_dir / 'summary.md'}")
         return 0
 
     if args.dry_run:
-        preview_results = [
-            _selection_result(scenario, status="selected") for scenario in selected
-        ] + results
-        _write_summary(run_dir, preview_results)
+        _write_selection_preview(
+            run_dir=run_dir,
+            selected=selected,
+            skipped_results=results,
+        )
         print(f"dry_run: {run_dir / 'summary.md'}")
         print(
             f"selected={len(selected)} skipped={len(results)} "

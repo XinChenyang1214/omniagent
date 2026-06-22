@@ -794,6 +794,8 @@ def test_dry_run_writes_selection_summary_without_executing(tmp_path: Path, caps
             "general_agent_usability",
             "--scenario-glob",
             "*_tool_choice",
+            "--expect-selected-count",
+            "1",
             "--dry-run",
         ]
     )
@@ -808,6 +810,52 @@ def test_dry_run_writes_selection_summary_without_executing(tmp_path: Path, caps
     assert summary["selected"] == 1
     assert summary["results"][0]["status"] == "selected"
     assert summary["results"][0]["id"] == "general_agent_usability_file_organization_tool_choice"
+    assert not (run_dirs[0] / "workspaces").exists()
+
+
+def test_expected_selected_count_mismatch_fails_before_execution(
+    tmp_path: Path, capsys
+) -> None:
+    scenario_path = tmp_path / "scenarios.json"
+    run_root = tmp_path / "runs"
+    scenario_path.write_text(
+        json.dumps(
+            {
+                "scenarios": [
+                    {
+                        "id": "general_agent_usability_file_organization_tool_choice",
+                        "category": "general_agent_usability",
+                        "kind": "task",
+                        "goal": "copy inputs/a.txt to outputs/a.txt",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = evals.main(
+        [
+            "--scenarios",
+            str(scenario_path),
+            "--run-root",
+            str(run_root),
+            "--scenario-category",
+            "general_agent_usability",
+            "--expect-selected-count",
+            "2",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "selected_count_mismatch: expected=2 actual=1" in captured.err
+    run_dirs = list(run_root.iterdir())
+    assert len(run_dirs) == 1
+    summary = json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
+    assert summary["selected"] == 1
+    assert summary["results"][0]["status"] == "selected"
     assert not (run_dirs[0] / "workspaces").exists()
 
 
