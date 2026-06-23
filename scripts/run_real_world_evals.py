@@ -364,6 +364,19 @@ def _case_proves_real_llm_baseline(case: dict[str, Any]) -> bool:
     return (case.get("status") == "passed") and ("llm_called" in _llm_usage_signals(case))
 
 
+def _case_proves_real_llm_preflight(case: dict[str, Any]) -> bool:
+    provider = str(case.get("run_llm_provider") or "").strip().lower()
+    if provider in NON_REAL_LLM_PROVIDERS:
+        return False
+    if case.get("run_dry_run") is not True:
+        return False
+    if case.get("run_real_llm_required") is not True:
+        return False
+    if case.get("status") != "selected":
+        return False
+    return _case_int_value(case, "llm_call_count") == 0
+
+
 def _general_agent_usability_evidence_audit(
     definition: dict[str, Any],
     evidence_index: dict[str, Any] | None,
@@ -389,10 +402,15 @@ def _general_agent_usability_evidence_audit(
             real_llm_cases = [
                 case for case in scenario_cases if _case_proves_real_llm_baseline(case)
             ]
+            preflight_cases = [
+                case for case in scenario_cases if _case_proves_real_llm_preflight(case)
+            ]
             path_records[path] = {
                 "scenario_id": scenario_id,
                 "passed": bool(passed_cases),
                 "passed_count": len(passed_cases),
+                "real_llm_preflight": bool(preflight_cases),
+                "real_llm_preflight_count": len(preflight_cases),
                 "real_llm_passed": bool(real_llm_cases),
                 "real_llm_passed_count": len(real_llm_cases),
             }
@@ -401,6 +419,10 @@ def _general_agent_usability_evidence_audit(
             "all_paths_passed": all(item["passed"] for item in path_records.values()),
             "tool_choice_real_llm_passed": path_records.get("tool_choice", {}).get(
                 "real_llm_passed",
+                False,
+            ),
+            "tool_choice_real_llm_preflight": path_records.get("tool_choice", {}).get(
+                "real_llm_preflight",
                 False,
             ),
         }
@@ -412,6 +434,9 @@ def _general_agent_usability_evidence_audit(
     real_llm_baseline_ready = evidence_available and all(
         record["tool_choice_real_llm_passed"] for record in task_type_records.values()
     )
+    real_llm_preflight_ready = evidence_available and all(
+        record["tool_choice_real_llm_preflight"] for record in task_type_records.values()
+    )
     return {
         "evidence_available": evidence_available,
         "source_run_count": evidence_index.get("run_count", 0)
@@ -419,6 +444,7 @@ def _general_agent_usability_evidence_audit(
         else 0,
         "total_index_cases": len(cases),
         "all_required_scenarios_passed": offline_or_any_evidence_ready,
+        "real_llm_preflight_ready": real_llm_preflight_ready,
         "real_llm_baseline_ready": real_llm_baseline_ready,
         "task_types": task_type_records,
     }
@@ -436,6 +462,8 @@ def build_general_agent_usability_audit(
     if not evidence["all_required_scenarios_passed"]:
         missing.append("passed_evidence_for_all_required_scenarios")
     if not evidence["real_llm_baseline_ready"]:
+        if not evidence["real_llm_preflight_ready"]:
+            missing.append("real_llm_tool_choice_preflight")
         missing.append("real_llm_tool_choice_baseline")
     complete = not missing
     return {
@@ -462,14 +490,15 @@ def render_general_agent_usability_audit_markdown(payload: dict[str, Any]) -> st
         f"- ready_task_types: {definition.get('ready_task_type_count', 0)}/{definition.get('task_type_count', 0)}",
         f"- evidence_available: `{evidence.get('evidence_available')}`",
         f"- all_required_scenarios_passed: `{evidence.get('all_required_scenarios_passed')}`",
+        f"- real_llm_preflight_ready: `{evidence.get('real_llm_preflight_ready')}`",
         f"- real_llm_baseline_ready: `{evidence.get('real_llm_baseline_ready')}`",
         f"- source_run_count: {evidence.get('source_run_count', 0)}",
         f"- total_index_cases: {evidence.get('total_index_cases', 0)}",
         "",
         "## Task Types",
         "",
-        "| Task Type | Definition | Learning Evidence | Tool Choice Evidence | Real LLM Tool Choice | Permission Evidence |",
-        "|---|---|---|---|---|---|",
+        "| Task Type | Definition | Learning Evidence | Tool Choice Evidence | Real LLM Preflight | Real LLM Tool Choice | Permission Evidence |",
+        "|---|---|---|---|---|---|---|",
     ]
     evidence_task_types = (
         evidence.get("task_types") if isinstance(evidence.get("task_types"), dict) else {}
@@ -484,6 +513,7 @@ def render_general_agent_usability_audit_markdown(payload: dict[str, Any]) -> st
         lines.append(
             f"| `{task_type}` | `{bool(definition_record.get('ready'))}` | "
             f"`{bool(learning.get('passed'))}` | `{bool(tool_choice.get('passed'))}` | "
+            f"`{bool(tool_choice.get('real_llm_preflight'))}` | "
             f"`{bool(tool_choice.get('real_llm_passed'))}` | "
             f"`{bool(permission.get('passed'))}` |"
         )

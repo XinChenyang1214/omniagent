@@ -921,12 +921,66 @@ def test_general_agent_usability_audit_reports_real_llm_gap() -> None:
     assert audit["definition"]["scenario_definition_ready"] is True
     assert audit["definition"]["ready_task_type_count"] == 5
     assert audit["evidence"]["all_required_scenarios_passed"] is False
+    assert audit["evidence"]["real_llm_preflight_ready"] is False
     assert audit["evidence"]["real_llm_baseline_ready"] is False
     assert audit["missing"] == [
         "passed_evidence_for_all_required_scenarios",
+        "real_llm_tool_choice_preflight",
         "real_llm_tool_choice_baseline",
     ]
-    assert "| `file_organization` | `True` | `False` | `False` | `False` | `False` |" in markdown
+    assert (
+        "| `file_organization` | `True` | `False` | `False` | "
+        "`False` | `False` | `False` |"
+    ) in markdown
+
+
+def test_general_agent_usability_audit_reports_ready_preflight_before_baseline() -> None:
+    scenarios = evals._normalize_scenarios(evals.DEFAULT_SCENARIOS)
+    definition = evals._general_agent_usability_definition_audit(scenarios)
+    cases = []
+    for record in definition["task_types"].values():
+        for path, path_record in record["paths"].items():
+            scenario_id = path_record["scenario_id"]
+            cases.append(
+                {
+                    "scenario_id": scenario_id,
+                    "category": "general_agent_usability",
+                    "status": "passed",
+                    "failure_layer": "none",
+                    "run_llm_provider": "test",
+                    "run_llm_model": "deterministic",
+                    "run_dry_run": False,
+                    "run_real_llm_required": False,
+                    "llm_call_count": 0,
+                    "llm_total_tokens": 0,
+                }
+            )
+            if path == "tool_choice":
+                cases.append(
+                    {
+                        "scenario_id": scenario_id,
+                        "category": "general_agent_usability",
+                        "status": "selected",
+                        "failure_layer": "none",
+                        "run_llm_provider": "openai",
+                        "run_llm_model": "real-model",
+                        "run_dry_run": True,
+                        "run_real_llm_required": True,
+                        "llm_call_count": 0,
+                        "llm_total_tokens": 0,
+                    }
+                )
+
+    audit = evals.build_general_agent_usability_audit(
+        scenarios,
+        {"run_count": 2, "cases": cases},
+    )
+
+    assert audit["complete"] is False
+    assert audit["missing"] == ["real_llm_tool_choice_baseline"]
+    assert audit["evidence"]["all_required_scenarios_passed"] is True
+    assert audit["evidence"]["real_llm_preflight_ready"] is True
+    assert audit["evidence"]["real_llm_baseline_ready"] is False
 
 
 def test_general_agent_usability_audit_accepts_complete_real_llm_evidence() -> None:
@@ -968,16 +1022,25 @@ def test_general_agent_usability_audit_accepts_complete_real_llm_evidence() -> N
     assert audit["complete"] is True
     assert audit["missing"] == []
     assert audit["evidence"]["all_required_scenarios_passed"] is True
+    assert audit["evidence"]["real_llm_preflight_ready"] is False
     assert audit["evidence"]["real_llm_baseline_ready"] is True
 
 
 def test_general_agent_usability_audit_cli_allows_incomplete_report(
     tmp_path: Path, capsys
 ) -> None:
+    run_root = tmp_path / "runs"
+    run_root.mkdir()
+    (run_root / "evidence_index.json").write_text(
+        json.dumps({"schema_version": "eval-evidence-index/v1", "run_count": 0, "cases": []}),
+        encoding="utf-8",
+    )
     output_path = tmp_path / "audit.md"
 
     exit_code = evals.main(
         [
+            "--run-root",
+            str(run_root),
             "--audit-general-agent-usability",
             "--audit-output",
             str(output_path),
@@ -989,7 +1052,9 @@ def test_general_agent_usability_audit_cli_allows_incomplete_report(
     assert exit_code == 0
     assert "status=incomplete" in captured.out
     assert output_path.exists()
-    assert "real_llm_tool_choice_baseline" in output_path.read_text(encoding="utf-8")
+    output = output_path.read_text(encoding="utf-8")
+    assert "real_llm_tool_choice_preflight" in output
+    assert "real_llm_tool_choice_baseline" in output
 
 
 def test_evidence_index_enriches_legacy_skipped_summary_with_scenario_metadata(
