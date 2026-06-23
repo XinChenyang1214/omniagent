@@ -859,6 +859,51 @@ def test_expected_selected_count_mismatch_fails_before_execution(
     assert not (run_dirs[0] / "workspaces").exists()
 
 
+def test_require_real_llm_rejects_test_provider_before_execution(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    scenario_path = tmp_path / "scenarios.json"
+    run_root = tmp_path / "runs"
+    scenario_path.write_text(
+        json.dumps(
+            {
+                "scenarios": [
+                    {
+                        "id": "general_agent_usability_file_organization_tool_choice",
+                        "category": "general_agent_usability",
+                        "kind": "task",
+                        "goal": "copy inputs/a.txt to outputs/a.txt",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OMNIAGENT_LLM_PROVIDER", "test")
+
+    exit_code = evals.main(
+        [
+            "--scenarios",
+            str(scenario_path),
+            "--run-root",
+            str(run_root),
+            "--scenario-category",
+            "general_agent_usability",
+            "--expect-selected-count",
+            "1",
+            "--require-real-llm",
+            "--dry-run",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "require_real_llm_failed" in captured.err
+    assert "llm.provider=test" in captured.err
+    assert not run_root.exists()
+
+
 def test_evidence_index_enriches_legacy_skipped_summary_with_scenario_metadata(
     tmp_path: Path,
 ) -> None:

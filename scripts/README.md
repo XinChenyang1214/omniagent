@@ -19,11 +19,11 @@ python3 scripts/run_real_world_evals.py
 python3 scripts/run_real_world_evals.py --scenario csv_sales_summary
 OMNIAGENT_LLM_PROVIDER=test python3 scripts/run_real_world_evals.py --scenario general_agent_usability_file_organization
 OMNIAGENT_LLM_PROVIDER=test python3 scripts/run_real_world_evals.py --scenario-category general_agent_usability --scenario-glob "general_agent_usability_*_tool_choice"
-python3 scripts/run_real_world_evals.py --scenario-category general_agent_usability --scenario-glob "general_agent_usability_*_tool_choice" --expect-selected-count 5 --dry-run
+python3 scripts/run_real_world_evals.py --scenario-category general_agent_usability --scenario-glob "general_agent_usability_*_tool_choice" --expect-selected-count 5 --require-real-llm --dry-run
 python3 scripts/run_real_world_evals.py --include-network
 python3 scripts/run_real_world_evals.py --include-l4
 ```
 
-`--scenario-category` 可按 category 选择场景，`--scenario-glob` 可按场景 id glob 选择子集；两者同时使用时必须同时匹配。`--expect-selected-count` 可在执行前断言选中场景数量。`--dry-run` 只写 selected / skipped 预览 summary，不执行任务。`OMNIAGENT_LLM_PROVIDER=test` 可用于离线基线和回归调试，不调用外部 LLM；真实模型能力仍需使用实际 provider 单独验证。
+`--scenario-category` 可按 category 选择场景，`--scenario-glob` 可按场景 id glob 选择子集；两者同时使用时必须同时匹配。`--expect-selected-count` 可在执行前断言选中场景数量。`--require-real-llm` 会拒绝 `test` / `stub` / `mock` / `fake` / `rule_based` 这类确定性 provider，避免把离线基线误当真实模型基线。`--dry-run` 只写 selected / skipped 预览 summary，不执行任务。`OMNIAGENT_LLM_PROVIDER=test` 可用于离线基线和回归调试，不调用外部 LLM；真实模型能力仍需使用实际 provider 单独验证。
 
 场景定义见 [`../evals/real_world/scenarios.json`](../evals/real_world/scenarios.json)，流程说明见 [`../REAL_WORLD_EVAL_PLAN.md`](../REAL_WORLD_EVAL_PLAN.md)。

@@ -35,6 +35,7 @@ TEXT_PREVIEW_SUFFIXES = {
     ".yaml",
     ".yml",
 }
+NON_REAL_LLM_PROVIDERS = {"", "test", "stub", "mock", "fake", "rule_based"}
 
 
 def _load_json(path: Path) -> Any:
@@ -172,6 +173,41 @@ def _scenario_matches_run_selection(scenario: dict[str, Any], args: argparse.Nam
 
 def _matches_selector(value: str, selectors: list[str]) -> bool:
     return any(value == selector or fnmatch.fnmatchcase(value, selector) for selector in selectors)
+
+
+def _current_llm_config_summary() -> dict[str, Any]:
+    src_path = str(REPO_ROOT / "src")
+    if src_path not in sys.path:
+        sys.path.insert(0, src_path)
+
+    from omniagent.config import AppConfig
+
+    config = AppConfig.from_env(REPO_ROOT)
+    return {
+        "provider": str(config.llm.provider or "").strip().lower(),
+        "model": str(config.llm.model or ""),
+        "fallback_provider": str(config.llm.fallback_provider or "").strip().lower(),
+        "fallback_enabled": bool(config.llm.enable_runtime_fallback),
+    }
+
+
+def _real_llm_guard_error() -> str | None:
+    llm = _current_llm_config_summary()
+    provider = str(llm.get("provider") or "")
+    fallback_provider = str(llm.get("fallback_provider") or "")
+    fallback_enabled = bool(llm.get("fallback_enabled"))
+    violations: list[str] = []
+    if provider in NON_REAL_LLM_PROVIDERS:
+        violations.append(f"llm.provider={provider or '<empty>'}")
+    if fallback_enabled and fallback_provider in NON_REAL_LLM_PROVIDERS and fallback_provider:
+        violations.append(f"llm.fallback_provider={fallback_provider}")
+    if not violations:
+        return None
+    return (
+        "require_real_llm_failed: configured deterministic provider is not allowed "
+        f"({', '.join(violations)}). Set OMNIAGENT_LLM_PROVIDER or omniagent.toml "
+        "to a real provider before running this baseline."
+    )
 
 
 def _selection_result(
@@ -7106,6 +7142,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="Fail before execution unless exactly this many scenarios are selected",
     )
+    parser.add_argument(
+        "--require-real-llm",
+        action="store_true",
+        help=(
+            "Fail before execution when the configured LLM provider is "
+            "test/stub/mock/fake/rule_based"
+        ),
+    )
     parser.add_argument("--check-only", action="store_true", help="Validate scenario file and exit")
     parser.add_argument(
         "--build-evidence-index",
@@ -7397,6 +7441,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.expect_selected_count is not None and args.expect_selected_count < 0:
         print("--expect-selected-count must be non-negative", file=sys.stderr)
         return 2
+    if args.require_real_llm:
+        guard_error = _real_llm_guard_error()
+        if guard_error:
+            print(guard_error, file=sys.stderr)
+            return 2
     run_root = Path(args.run_root).resolve()
     evidence_index_payload: dict[str, Any] | None = None
     evidence_index_path: Path | None = None
