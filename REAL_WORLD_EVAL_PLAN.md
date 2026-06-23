@@ -179,6 +179,8 @@ poetry run python scripts/run_real_world_evals.py --scenario-category general_ag
 poetry run python scripts/run_real_world_evals.py --scenario-category general_agent_usability --scenario-glob "general_agent_usability_*_tool_choice" --expect-selected-count 5 --require-real-llm --run-root eval_runs/general_agent_usability_real
 ```
 
+`summary.json` / `summary.md` 会记录 selector、dry-run / real-LLM guard 和不含密钥的 LLM provider / model 摘要，作为区分离线 test provider 与真实 provider 基线的审计证据。
+
 从已有 `eval_runs/` 生成跨 run evidence index，不重新执行评测：
 
 ```bash

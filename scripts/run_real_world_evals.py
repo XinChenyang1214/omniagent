@@ -210,6 +210,28 @@ def _real_llm_guard_error() -> str | None:
     )
 
 
+def _run_metadata(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "selection": {
+            "scenario": _split_filter_values(getattr(args, "scenario", None)),
+            "scenario_glob": _split_filter_values(getattr(args, "scenario_glob", None)),
+            "scenario_category": _split_filter_values(
+                getattr(args, "scenario_category", None)
+            ),
+            "expect_selected_count": getattr(args, "expect_selected_count", None),
+            "include_network": bool(getattr(args, "include_network", False)),
+            "include_l4": bool(getattr(args, "include_l4", False)),
+            "include_complex": bool(getattr(args, "include_complex", False)),
+            "include_all": bool(getattr(args, "include_all", False)),
+        },
+        "execution": {
+            "dry_run": bool(getattr(args, "dry_run", False)),
+            "require_real_llm": bool(getattr(args, "require_real_llm", False)),
+        },
+        "llm": _current_llm_config_summary(),
+    }
+
+
 def _selection_result(
     scenario: dict[str, Any],
     *,
@@ -254,11 +276,12 @@ def _write_selection_preview(
     run_dir: Path,
     selected: list[dict[str, Any]],
     skipped_results: list[dict[str, Any]],
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     preview_results = [
         _selection_result(scenario, status="selected") for scenario in selected
     ] + skipped_results
-    _write_summary(run_dir, preview_results)
+    _write_summary(run_dir, preview_results, metadata=metadata)
 
 
 def _prepare_workspace(run_dir: Path, scenario: dict[str, Any]) -> Path:
@@ -2795,7 +2818,12 @@ def _run_one(
     return result
 
 
-def _write_summary(run_dir: Path, results: list[dict[str, Any]]) -> None:
+def _write_summary(
+    run_dir: Path,
+    results: list[dict[str, Any]],
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> None:
     total = len(results)
     passed = sum(1 for item in results if item["status"] == "passed")
     failed = sum(1 for item in results if item["status"] == "failed")
@@ -2809,6 +2837,7 @@ def _write_summary(run_dir: Path, results: list[dict[str, Any]]) -> None:
         "failed": failed,
         "skipped": skipped,
         "selected": selected,
+        "metadata": metadata or {},
         "results": results,
     }
     _write_json(run_dir / "summary.json", summary)
@@ -2821,10 +2850,16 @@ def _write_summary(run_dir: Path, results: list[dict[str, Any]]) -> None:
         f"- failed: {failed}",
         f"- skipped: {skipped}",
         f"- selected: {selected}",
-        "",
-        "| Scenario | Status | Diagnosis | Failure Layer | Diagnostics | Evidence |",
-        "|---|---|---|---|---|---|",
     ]
+    if metadata:
+        lines.extend(_summary_metadata_lines(metadata))
+    lines.extend(
+        [
+            "",
+            "| Scenario | Status | Diagnosis | Failure Layer | Diagnostics | Evidence |",
+            "|---|---|---|---|---|---|",
+        ]
+    )
     for item in results:
         evidence = ", ".join(item.get("task_ids", []) + item.get("thread_ids", [])) or "-"
         diagnostics = "-"
@@ -2856,6 +2891,24 @@ def _write_summary(run_dir: Path, results: list[dict[str, Any]]) -> None:
                 ]
             )
     (run_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _summary_metadata_lines(metadata: dict[str, Any]) -> list[str]:
+    selection = metadata.get("selection") if isinstance(metadata.get("selection"), dict) else {}
+    execution = metadata.get("execution") if isinstance(metadata.get("execution"), dict) else {}
+    llm = metadata.get("llm") if isinstance(metadata.get("llm"), dict) else {}
+    return [
+        f"- selector.scenario: `{selection.get('scenario') or []}`",
+        f"- selector.scenario_glob: `{selection.get('scenario_glob') or []}`",
+        f"- selector.scenario_category: `{selection.get('scenario_category') or []}`",
+        f"- selector.expect_selected_count: `{selection.get('expect_selected_count')}`",
+        f"- execution.dry_run: `{execution.get('dry_run')}`",
+        f"- execution.require_real_llm: `{execution.get('require_real_llm')}`",
+        f"- llm.provider: `{llm.get('provider') or ''}`",
+        f"- llm.model: `{llm.get('model') or ''}`",
+        f"- llm.fallback_provider: `{llm.get('fallback_provider') or ''}`",
+        f"- llm.fallback_enabled: `{llm.get('fallback_enabled')}`",
+    ]
 
 
 def _relative_path(path: Path, root: Path) -> str:
@@ -7607,6 +7660,7 @@ def main(argv: list[str] | None = None) -> int:
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     run_dir = run_root / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
+    run_metadata = _run_metadata(args)
     selected, results = _select_scenarios(scenarios, args)
 
     if (
@@ -7617,6 +7671,7 @@ def main(argv: list[str] | None = None) -> int:
             run_dir=run_dir,
             selected=selected,
             skipped_results=results,
+            metadata=run_metadata,
         )
         print(
             "selected_count_mismatch: "
@@ -7627,7 +7682,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if not selected:
-        _write_summary(run_dir, results)
+        _write_summary(run_dir, results, metadata=run_metadata)
         print(f"no scenarios selected; summary: {run_dir / 'summary.md'}")
         return 0
 
@@ -7636,6 +7691,7 @@ def main(argv: list[str] | None = None) -> int:
             run_dir=run_dir,
             selected=selected,
             skipped_results=results,
+            metadata=run_metadata,
         )
         print(f"dry_run: {run_dir / 'summary.md'}")
         print(
@@ -7647,7 +7703,7 @@ def main(argv: list[str] | None = None) -> int:
     for scenario in selected:
         results.append(_run_one(scenario=scenario, run_dir=run_dir, args=args))
 
-    _write_summary(run_dir, results)
+    _write_summary(run_dir, results, metadata=run_metadata)
     failed = sum(1 for item in results if item["status"] == "failed")
     print(f"summary: {run_dir / 'summary.md'}")
     print(

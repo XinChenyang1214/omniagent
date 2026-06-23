@@ -808,6 +808,12 @@ def test_dry_run_writes_selection_summary_without_executing(tmp_path: Path, caps
     assert len(run_dirs) == 1
     summary = json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
     assert summary["selected"] == 1
+    assert summary["metadata"]["selection"]["scenario_category"] == [
+        "general_agent_usability"
+    ]
+    assert summary["metadata"]["selection"]["scenario_glob"] == ["*_tool_choice"]
+    assert summary["metadata"]["execution"]["dry_run"] is True
+    assert summary["metadata"]["llm"]["provider"]
     assert summary["results"][0]["status"] == "selected"
     assert summary["results"][0]["id"] == "general_agent_usability_file_organization_tool_choice"
     assert not (run_dirs[0] / "workspaces").exists()
@@ -855,6 +861,7 @@ def test_expected_selected_count_mismatch_fails_before_execution(
     assert len(run_dirs) == 1
     summary = json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
     assert summary["selected"] == 1
+    assert summary["metadata"]["selection"]["expect_selected_count"] == 2
     assert summary["results"][0]["status"] == "selected"
     assert not (run_dirs[0] / "workspaces").exists()
 
