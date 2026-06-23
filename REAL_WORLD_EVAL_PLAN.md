@@ -35,7 +35,7 @@
 - 已归档 Git 场景：`git_status_readonly_report` 按用户要求未执行，不纳入本次归档通过口径。
 - 当前场景文件总数：58；默认非 Git 基线 `eval_runs/20260521_073254/` 为 27 passed / 0 failed / 11 skipped；复杂矩阵 `eval_runs/20260521_092801/` 为 8 passed / 0 failed / 0 skipped；learning-loop 场景 `eval_runs/20260612_034828/` 和 `eval_runs/20260613_042808/` 均为 1 passed / 0 failed / 0 skipped；首批 `general_agent_usability_*` 场景已加入并通过 `--check-only`，覆盖 5 类学习序列、5 个自然语言 tool-choice 场景和 5 个权限边界场景，离线 `OMNIAGENT_LLM_PROVIDER=test` 最新基线已写入 `eval_runs/general_agent_usability_offline_latest/`，真实 LLM provider 基线仍待建立；`git_status_readonly_report` 仍按用户要求未执行。
 - 跨 eval evidence index 已可通过 `poetry run python scripts/run_real_world_evals.py --build-evidence-index` 生成；当前本地索引写入 `eval_runs/evidence_index.json` / `eval_runs/evidence_index.md`，覆盖 67 个 run、463 个 case，并在 JSON `summary` 与 Markdown summary 中展示 status / scenario / category / requires / skip reason / failure layer 分布。
-- evidence index 可通过 `poetry run python scripts/run_real_world_evals.py --query-evidence-index` 查询，支持按 failure layer、used skill、procedure id、habit id、skill lineage、scenario id、promotion generation type、promotion source target、category、requires、skip reason、permission summary、completion evaluation failure layer、ExecutionPolicy policy decision、ExecutionPolicy skipped stage、ExecutionPolicy risk flag、ExecutionPolicy reason、ExecutionPolicy context budget、LLM request payload stats、TaskGraph node status、Critic action、memory retrieval / embedding signal、LLM usage / token / duration signal、learning evidence kind、learning validation evidence、skill validation status、procedure / habit review decision 和 audit event 过滤，并可输出 Markdown / JSON 回归报告视图。
+- evidence index 可通过 `poetry run python scripts/run_real_world_evals.py --query-evidence-index` 查询，支持按 failure layer、used skill、procedure id、habit id、skill lineage、scenario id、promotion generation type、promotion source target、category、requires、skip reason、permission summary、completion evaluation failure layer、ExecutionPolicy policy decision、ExecutionPolicy skipped stage、ExecutionPolicy risk flag、ExecutionPolicy reason、ExecutionPolicy context budget、LLM request payload stats、TaskGraph node status、Critic action、memory retrieval / embedding signal、run-level LLM provider / model、LLM usage / token / duration signal、learning evidence kind、learning validation evidence、skill validation status、procedure / habit review decision 和 audit event 过滤，并可输出 Markdown / JSON 回归报告视图。
 - evidence dashboard 可通过 `poetry run python scripts/run_real_world_evals.py --evidence-dashboard` 生成，默认写入 `eval_runs/evidence_dashboard.md`，固定包含失败修复入口、regression commands（含 failed scenario rerun 命令、固定视图查询、eval coverage status / scenario / category / requires / skip reason 动态查询、used skill 动态查询、procedure id 动态查询、habit id 动态查询、lineage skill 动态查询、promotion generation type 动态查询、promotion source target 动态查询、permission summary 动态查询、completion layer 非 `none` 动态查询、policy decision 动态查询、skipped stage 动态查询、policy risk flag 动态查询、policy reason 动态查询、policy context budget / request payload stats 高水位动态查询、node status `status:*` / `attempts:*` / `error:*` 动态查询、critic action `action:*` 动态查询、memory retrieval 低基数状态动态查询、LLM usage 低基数 token / duration / call-state 动态查询、learning kind 动态查询、learning validation 动态查询、skill validation 动态查询、learning review decision 动态查询和 learning audit event 动态查询）、eval coverage（status / scenario / category / requires / skip reason）、skipped eval、failure layer 查询命令、skill/tool 失败、model capability、node execution、critic action、completion evaluation、memory retrieval、LLM usage、runtime cost hotspot、execution policy、Planner skipped、policy risk flag、policy reason、policy context budget、request payload stats、permission governance、habit fast path、learning match explanation、learning gate、learning governance、learning history、learning approval、learning promotion、learning validation、learning edit、learning request-changes、learning decay、learning disable、learning restore、learning rollback、learning rejection、learning audit gap、generated habit skill 使用、skill lifecycle governance、skill promotion coverage、skill approval gate 和 learning lineage cases；需要单独导出可复制命令清单时，使用 `--evidence-dashboard-commands-output eval_runs/evidence_dashboard.commands`。
 - 新增 8 个 `requires: ["complex"]` 的复杂场景已通过完整矩阵回归。
 - 最近关键证据：
@@ -180,6 +180,12 @@ poetry run python scripts/run_real_world_evals.py --scenario-category general_ag
 ```
 
 `summary.json` / `summary.md` 会记录 selector、dry-run / real-LLM guard 和不含密钥的 LLM provider / model 摘要，作为区分离线 test provider 与真实 provider 基线的审计证据。
+重新构建 evidence index 后，可按 run-level provider / model 直接查询真实基线证据：
+
+```bash
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-run-llm-provider openai
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-run-llm-model "qwen*"
+```
 
 从已有 `eval_runs/` 生成跨 run evidence index，不重新执行评测：
 
@@ -187,6 +193,8 @@ poetry run python scripts/run_real_world_evals.py --scenario-category general_ag
 poetry run python scripts/run_real_world_evals.py --build-evidence-index
 poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-llm-usage llm_called
 poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-llm-usage "tokens:10000+,duration:60s+"
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-run-llm-provider openai
+poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-run-llm-model "qwen*"
 poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-promotion-generation-type "json"
 poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-promotion-source-target "tsv"
 poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-policy-decision direct_execute

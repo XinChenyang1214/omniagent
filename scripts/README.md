@@ -24,6 +24,6 @@ python3 scripts/run_real_world_evals.py --include-network
 python3 scripts/run_real_world_evals.py --include-l4
 ```
 
-`--scenario-category` 可按 category 选择场景，`--scenario-glob` 可按场景 id glob 选择子集；两者同时使用时必须同时匹配。`--expect-selected-count` 可在执行前断言选中场景数量。`--require-real-llm` 会拒绝 `test` / `stub` / `mock` / `fake` / `rule_based` 这类确定性 provider，避免把离线基线误当真实模型基线。`--dry-run` 只写 selected / skipped 预览 summary，不执行任务。summary 会记录 selector、dry-run / real-LLM guard 和不含密钥的 LLM provider / model 摘要。`OMNIAGENT_LLM_PROVIDER=test` 可用于离线基线和回归调试，不调用外部 LLM；真实模型能力仍需使用实际 provider 单独验证。
+`--scenario-category` 可按 category 选择场景，`--scenario-glob` 可按场景 id glob 选择子集；两者同时使用时必须同时匹配。`--expect-selected-count` 可在执行前断言选中场景数量。`--require-real-llm` 会拒绝 `test` / `stub` / `mock` / `fake` / `rule_based` 这类确定性 provider，避免把离线基线误当真实模型基线。`--dry-run` 只写 selected / skipped 预览 summary，不执行任务。summary 会记录 selector、dry-run / real-LLM guard 和不含密钥的 LLM provider / model 摘要；重建 evidence index 后可用 `--evidence-run-llm-provider` / `--evidence-run-llm-model` 查询这些 run-level 模型环境。`OMNIAGENT_LLM_PROVIDER=test` 可用于离线基线和回归调试，不调用外部 LLM；真实模型能力仍需使用实际 provider 单独验证。
 
 场景定义见 [`../evals/real_world/scenarios.json`](../evals/real_world/scenarios.json)，流程说明见 [`../REAL_WORLD_EVAL_PLAN.md`](../REAL_WORLD_EVAL_PLAN.md)。

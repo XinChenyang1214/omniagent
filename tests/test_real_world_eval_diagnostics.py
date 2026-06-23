@@ -1193,6 +1193,15 @@ def test_evidence_index_summarizes_runs_and_learning_artifacts(tmp_path: Path) -
                 "passed": 1,
                 "failed": 0,
                 "skipped": 0,
+                "metadata": {
+                    "execution": {"dry_run": False, "require_real_llm": True},
+                    "llm": {
+                        "provider": "openai",
+                        "model": "gpt-test",
+                        "fallback_provider": "",
+                        "fallback_enabled": True,
+                    },
+                },
                 "results": [result],
             }
         ),
@@ -1211,7 +1220,17 @@ def test_evidence_index_summarizes_runs_and_learning_artifacts(tmp_path: Path) -
     assert payload["summary"]["by_requires"] == {}
     assert payload["summary"]["by_skip_reason"] == {}
     assert payload["summary"]["by_failure_layer"] == {"none": 1}
+    assert payload["summary"]["by_run_llm_provider"] == {"openai": 1}
+    assert payload["summary"]["by_run_llm_model"] == {"gpt-test": 1}
+    assert payload["runs"][0]["run_llm_provider"] == "openai"
+    assert payload["runs"][0]["run_llm_model"] == "gpt-test"
+    assert payload["runs"][0]["run_real_llm_required"] is True
     case = payload["cases"][0]
+    assert case["run_llm_provider"] == "openai"
+    assert case["run_llm_model"] == "gpt-test"
+    assert case["run_llm_fallback_enabled"] is True
+    assert case["run_real_llm_required"] is True
+    assert case["run_dry_run"] is False
     assert case["used_skills"] == ["generated.habit.demo"]
     assert case["permission_summary"] == {"filesystem.write:granted": 1}
     assert case["llm_total_tokens"] == 42
@@ -1251,6 +1270,8 @@ def test_evidence_index_summarizes_runs_and_learning_artifacts(tmp_path: Path) -
     assert output_json.exists()
     assert output_json.with_suffix(".md").exists()
     markdown = output_json.with_suffix(".md").read_text(encoding="utf-8")
+    assert "- run_llm_provider: `openai`=1" in markdown
+    assert "- run_llm_model: `gpt-test`=1" in markdown
     assert "- scenario: `learning_loop_case`=1" in markdown
     assert "| `20260612_000000` | `learning_loop_case` | learning_loop |" in markdown
 
@@ -1271,6 +1292,12 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
                 "failure_layer": "none",
                 "diagnosis": "passed",
                 "duration_seconds": 1.25,
+                "run_llm_provider": "openai",
+                "run_llm_model": "gpt-test",
+                "run_llm_fallback_provider": "",
+                "run_llm_fallback_enabled": True,
+                "run_real_llm_required": True,
+                "run_dry_run": False,
                 "llm_call_count": 1,
                 "llm_total_tokens": 42,
                 "task_ids": ["task_1"],
@@ -1423,6 +1450,12 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
                 "status": "failed",
                 "failure_layer": "skill_or_tool",
                 "diagnosis": "skill_execution_failed",
+                "run_llm_provider": "test",
+                "run_llm_model": "deterministic",
+                "run_llm_fallback_provider": "",
+                "run_llm_fallback_enabled": False,
+                "run_real_llm_required": False,
+                "run_dry_run": False,
                 "used_skills": ["builtin.data.json"],
                 "policy_decisions": [
                     {
@@ -1465,6 +1498,8 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
         node_statuses=["status:completed"],
         critic_actions=["action:accept"],
         memory_retrieval_signals=["vector_match"],
+        run_llm_providers=["openai"],
+        run_llm_models=["gpt-*"],
         llm_usage_signals=["llm_called"],
         learning_kinds=["habit_fast_paths"],
         learning_validation_statuses=["passed"],
@@ -1479,6 +1514,8 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
         policy_risk_flags=["planner_context_required"],
     )
     reason_query = evals.query_evidence_index(index, policy_reasons=["*risk flag*"])
+    provider_miss = evals.query_evidence_index(index, run_llm_providers=["anthropic"])
+    model_miss = evals.query_evidence_index(index, run_llm_models=["qwen*"])
     parsed = evals.build_parser().parse_args(
         [
             "--query-evidence-index",
@@ -1502,6 +1539,10 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
             "action:accept",
             "--evidence-memory-retrieval",
             "vector_match",
+            "--evidence-run-llm-provider",
+            "openai",
+            "--evidence-run-llm-model",
+            "gpt-*",
             "--evidence-llm-usage",
             "llm_called",
             "--evidence-category",
@@ -1536,6 +1577,8 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
     assert parsed.evidence_node_status == ["status:completed"]
     assert parsed.evidence_critic_action == ["action:accept"]
     assert parsed.evidence_memory_retrieval == ["vector_match"]
+    assert parsed.evidence_run_llm_provider == ["openai"]
+    assert parsed.evidence_run_llm_model == ["gpt-*"]
     assert parsed.evidence_llm_usage == ["llm_called"]
     assert parsed.evidence_category == ["learning_loop"]
     assert parsed.evidence_requires == ["complex"]
@@ -1564,6 +1607,8 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
     assert query["filters"]["node_status"] == ["status:completed"]
     assert query["filters"]["critic_action"] == ["action:accept"]
     assert query["filters"]["memory_retrieval"] == ["vector_match"]
+    assert query["filters"]["run_llm_provider"] == ["openai"]
+    assert query["filters"]["run_llm_model"] == ["gpt-*"]
     assert query["filters"]["llm_usage"] == ["llm_called"]
     assert query["filters"]["learning_kind"] == ["habit_fast_paths"]
     assert query["filters"]["learning_validation"] == ["passed"]
@@ -1576,6 +1621,8 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
     assert query["summary"]["matched_cases"] == 1
     assert generation_miss["summary"]["matched_cases"] == 0
     assert target_miss["summary"]["matched_cases"] == 0
+    assert provider_miss["summary"]["matched_cases"] == 0
+    assert model_miss["summary"]["matched_cases"] == 0
     assert query["summary"]["by_status"] == {"passed": 1}
     assert query["summary"]["by_scenario"] == {"learning_loop_case": 1}
     assert query["summary"]["by_category"] == {"learning_loop": 1}
@@ -1637,6 +1684,8 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
         "vector_match": 1,
         "vector_memory_entry": 1,
     }
+    assert query["summary"]["by_run_llm_provider"] == {"openai": 1}
+    assert query["summary"]["by_run_llm_model"] == {"gpt-test": 1}
     assert query["summary"]["by_llm_usage"] == {
         "duration:1-10s": 1,
         "llm_called": 1,
@@ -1752,6 +1801,12 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
                 "provider:local_model",
                 "model:bge-small",
             ],
+            "run_llm_provider": "openai",
+            "run_llm_model": "gpt-test",
+            "run_llm_fallback_provider": "",
+            "run_llm_fallback_enabled": True,
+            "run_real_llm_required": True,
+            "run_dry_run": False,
             "llm_call_count": 1,
             "llm_total_tokens": 42,
             "duration_seconds": 1.25,

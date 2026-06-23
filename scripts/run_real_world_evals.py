@@ -2954,6 +2954,26 @@ def _load_scenario_metadata_for_index() -> dict[str, dict[str, Any]]:
     }
 
 
+def _run_llm_metadata(summary_metadata: dict[str, Any] | None) -> dict[str, Any]:
+    metadata = summary_metadata if isinstance(summary_metadata, dict) else {}
+    execution = metadata.get("execution") if isinstance(metadata.get("execution"), dict) else {}
+    llm = metadata.get("llm") if isinstance(metadata.get("llm"), dict) else {}
+    return {
+        "run_llm_provider": str(llm.get("provider") or ""),
+        "run_llm_model": str(llm.get("model") or ""),
+        "run_llm_fallback_provider": str(llm.get("fallback_provider") or ""),
+        "run_llm_fallback_enabled": (
+            bool(llm.get("fallback_enabled")) if "fallback_enabled" in llm else None
+        ),
+        "run_dry_run": bool(execution.get("dry_run")) if "dry_run" in execution else None,
+        "run_real_llm_required": (
+            bool(execution.get("require_real_llm"))
+            if "require_real_llm" in execution
+            else None
+        ),
+    }
+
+
 def _summarize_permissions(permissions: list[dict[str, Any]]) -> dict[str, int]:
     summary: dict[str, int] = {}
     for item in permissions:
@@ -3341,6 +3361,7 @@ def _summarize_result_for_index(
     summary_path: Path,
     summary_result: dict[str, Any],
     scenario_metadata: dict[str, dict[str, Any]] | None = None,
+    summary_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     run_dir = summary_path.parent
     result = _load_case_result(summary_result)
@@ -3399,9 +3420,11 @@ def _summarize_result_for_index(
     if not skip_reason and result.get("status") == "skipped":
         skip_reason = result.get("diagnosis")
     failure_layer = result.get("failure_layer") or "none"
+    run_llm = _run_llm_metadata(summary_metadata)
     return {
         "run_id": _relative_path(run_dir, run_root),
         "run_dir": str(run_dir),
+        **run_llm,
         "scenario_id": result.get("id"),
         "category": result.get("category") or scenario_meta.get("category", "uncategorized"),
         "kind": result.get("kind") or scenario_meta.get("kind", "task"),
@@ -3448,11 +3471,15 @@ def _write_evidence_index(run_root: Path, output_json: Path) -> dict[str, Any]:
         summary = _load_json(summary_path)
         if not isinstance(summary, dict):
             continue
+        summary_metadata = summary.get("metadata") if isinstance(summary.get("metadata"), dict) else {}
+        run_llm = _run_llm_metadata(summary_metadata)
         results = [item for item in summary.get("results", []) if isinstance(item, dict)]
         runs.append(
             {
                 "run_id": _relative_path(summary_path.parent, run_root),
                 "run_dir": str(summary_path.parent),
+                **run_llm,
+                "metadata": summary_metadata,
                 "created_at": summary.get("created_at"),
                 "total": summary.get("total", len(results)),
                 "passed": summary.get("passed", 0),
@@ -3468,6 +3495,7 @@ def _write_evidence_index(run_root: Path, output_json: Path) -> dict[str, Any]:
                     summary_path=summary_path,
                     summary_result=result,
                     scenario_metadata=scenario_metadata,
+                    summary_metadata=summary_metadata,
                 )
             )
 
@@ -3499,6 +3527,8 @@ def _write_evidence_index(run_root: Path, output_json: Path) -> dict[str, Any]:
                 cases,
                 lambda case: [case.get("failure_layer", "unknown")],
             ),
+            "by_run_llm_provider": _count_case_values(cases, _run_llm_providers),
+            "by_run_llm_model": _count_case_values(cases, _run_llm_models),
         },
         "runs": runs,
         "cases": cases,
@@ -4155,6 +4185,16 @@ def _llm_usage_signals(case: dict[str, Any]) -> list[str]:
     return values
 
 
+def _run_llm_providers(case: dict[str, Any]) -> list[str]:
+    provider = str(case.get("run_llm_provider") or "")
+    return [provider] if provider else []
+
+
+def _run_llm_models(case: dict[str, Any]) -> list[str]:
+    model = str(case.get("run_llm_model") or "")
+    return [model] if model else []
+
+
 def _memory_retrieval_signals(case: dict[str, Any]) -> list[str]:
     values: list[str] = []
 
@@ -4231,6 +4271,8 @@ def _case_matches_evidence_filters(
     node_statuses: list[str],
     critic_actions: list[str],
     memory_retrieval_signals: list[str],
+    run_llm_providers: list[str],
+    run_llm_models: list[str],
     llm_usage_signals: list[str],
     learning_kinds: list[str],
     learning_validation_statuses: list[str],
@@ -4271,6 +4313,8 @@ def _case_matches_evidence_filters(
         and _matches_values(_node_status_signals(case), node_statuses)
         and _matches_values(_critic_action_signals(case), critic_actions)
         and _matches_values(_memory_retrieval_signals(case), memory_retrieval_signals)
+        and _matches_values(_run_llm_providers(case), run_llm_providers)
+        and _matches_values(_run_llm_models(case), run_llm_models)
         and _matches_values(_llm_usage_signals(case), llm_usage_signals)
         and _matches_values(_learning_evidence_kinds(case), learning_kinds)
         and _matches_values(_learning_validation_statuses(case), learning_validation_statuses)
@@ -4336,6 +4380,12 @@ def _compact_evidence_case(case: dict[str, Any]) -> dict[str, Any]:
         "node_status_signals": _node_status_signals(case),
         "critic_action_signals": _critic_action_signals(case),
         "memory_retrieval_signals": _memory_retrieval_signals(case),
+        "run_llm_provider": case.get("run_llm_provider"),
+        "run_llm_model": case.get("run_llm_model"),
+        "run_llm_fallback_provider": case.get("run_llm_fallback_provider"),
+        "run_llm_fallback_enabled": case.get("run_llm_fallback_enabled"),
+        "run_real_llm_required": case.get("run_real_llm_required"),
+        "run_dry_run": case.get("run_dry_run"),
         "llm_call_count": _case_int_value(case, "llm_call_count"),
         "llm_total_tokens": _case_int_value(case, "llm_total_tokens"),
         "duration_seconds": _case_float_value(case, "duration_seconds"),
@@ -4388,6 +4438,8 @@ def query_evidence_index(
     node_statuses: list[str] | None = None,
     critic_actions: list[str] | None = None,
     memory_retrieval_signals: list[str] | None = None,
+    run_llm_providers: list[str] | None = None,
+    run_llm_models: list[str] | None = None,
     llm_usage_signals: list[str] | None = None,
     learning_kinds: list[str] | None = None,
     learning_validation_statuses: list[str] | None = None,
@@ -4421,6 +4473,8 @@ def query_evidence_index(
         "node_status": _split_filter_values(node_statuses),
         "critic_action": _split_filter_values(critic_actions),
         "memory_retrieval": _split_filter_values(memory_retrieval_signals),
+        "run_llm_provider": _split_filter_values(run_llm_providers),
+        "run_llm_model": _split_filter_values(run_llm_models),
         "llm_usage": _split_filter_values(llm_usage_signals),
         "learning_kind": _split_filter_values(learning_kinds),
         "learning_validation": _split_filter_values(learning_validation_statuses),
@@ -4456,6 +4510,8 @@ def query_evidence_index(
             node_statuses=filters["node_status"],
             critic_actions=filters["critic_action"],
             memory_retrieval_signals=filters["memory_retrieval"],
+            run_llm_providers=filters["run_llm_provider"],
+            run_llm_models=filters["run_llm_model"],
             llm_usage_signals=filters["llm_usage"],
             learning_kinds=filters["learning_kind"],
             learning_validation_statuses=filters["learning_validation"],
@@ -4520,6 +4576,8 @@ def query_evidence_index(
         "by_node_status": _count_case_values(matched, _node_status_signals),
         "by_critic_action": _count_case_values(matched, _critic_action_signals),
         "by_memory_retrieval": _count_case_values(matched, _memory_retrieval_signals),
+        "by_run_llm_provider": _count_case_values(matched, _run_llm_providers),
+        "by_run_llm_model": _count_case_values(matched, _run_llm_models),
         "by_llm_usage": _count_case_values(matched, _llm_usage_signals),
         "by_learning_kind": _count_case_values(matched, _learning_evidence_kinds),
         "by_learning_validation": _count_case_values(matched, _learning_validation_statuses),
@@ -4597,6 +4655,8 @@ def render_evidence_query_markdown(payload: dict[str, Any]) -> str:
         "node_status",
         "critic_action",
         "memory_retrieval",
+        "run_llm_provider",
+        "run_llm_model",
         "llm_usage",
         "learning_kind",
         "learning_validation",
@@ -4657,6 +4717,8 @@ def render_evidence_query_markdown(payload: dict[str, Any]) -> str:
                 "memory_retrieval",
                 summary.get("by_memory_retrieval", {}),
             ),
+            _markdown_count_line("run_llm_provider", summary.get("by_run_llm_provider", {})),
+            _markdown_count_line("run_llm_model", summary.get("by_run_llm_model", {})),
             _markdown_count_line("llm_usage", summary.get("by_llm_usage", {})),
             _markdown_count_line("learning_kind", summary.get("by_learning_kind", {})),
             _markdown_count_line(
@@ -4675,8 +4737,8 @@ def render_evidence_query_markdown(payload: dict[str, Any]) -> str:
             "",
             "## Cases",
             "",
-            "| Run | Scenario | Category | Requires | Status | Skip Reason | Failure Layer | Completion Layers | Policy Decisions | Skipped Stages | Policy Risk Flags | Policy Reasons | Policy Context Budget | Request Payload Stats | Node Status | Critic Actions | Memory Retrieval | LLM Usage | Skills | Procedures | Habits | Lineage Skills | Promotion Types | Promotion Targets | Learning Validation | Skill Validation | Review Decisions | Audit Events | Permissions | Learning Kinds | Diagnostics |",
-            "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+            "| Run | Scenario | Category | Requires | Status | Skip Reason | Failure Layer | Completion Layers | Policy Decisions | Skipped Stages | Policy Risk Flags | Policy Reasons | Policy Context Budget | Request Payload Stats | Node Status | Critic Actions | Memory Retrieval | Run LLM Provider | Run LLM Model | LLM Usage | Skills | Procedures | Habits | Lineage Skills | Promotion Types | Promotion Targets | Learning Validation | Skill Validation | Review Decisions | Audit Events | Permissions | Learning Kinds | Diagnostics |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
         ]
     )
     for case in payload.get("cases", []):
@@ -4703,6 +4765,8 @@ def render_evidence_query_markdown(payload: dict[str, Any]) -> str:
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('node_status_signals'))))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('critic_action_signals'))))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('memory_retrieval_signals'))))} | "
+            f"{_markdown_cell(case.get('run_llm_provider'))} | "
+            f"{_markdown_cell(case.get('run_llm_model'))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('llm_usage_signals'))))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('used_skills'))))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('procedure_ids'))))} | "
@@ -4857,6 +4921,8 @@ def _learning_lineage_query(payload: dict[str, Any], *, limit: int) -> dict[str,
         returned,
         lambda case: _string_values(case.get("critic_action_signals")),
     )
+    summary["by_run_llm_provider"] = _count_case_values(returned, _run_llm_providers)
+    summary["by_run_llm_model"] = _count_case_values(returned, _run_llm_models)
     summary["by_llm_usage"] = _count_case_values(returned, _llm_usage_signals)
     return {
         "schema_version": EVIDENCE_QUERY_SCHEMA_VERSION,
@@ -4971,6 +5037,8 @@ def _dashboard_filtered_query(
             matched,
             lambda case: _string_values(case.get("memory_retrieval_signals")),
         ),
+        "by_run_llm_provider": _count_case_values(matched, _run_llm_providers),
+        "by_run_llm_model": _count_case_values(matched, _run_llm_models),
         "by_llm_usage": _count_case_values(matched, _llm_usage_signals),
         "by_learning_kind": _count_case_values(
             matched,
@@ -5499,6 +5567,40 @@ def _dashboard_regression_commands(
             {
                 "kind": "memory_retrieval_query",
                 "label": f"Memory retrieval {signal}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for provider, count in sorted((dashboard_summary.get("by_run_llm_provider") or {}).items()):
+        provider = str(provider).strip()
+        if not provider:
+            continue
+        command = _dashboard_query_command("evidence-run-llm-provider", provider)
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "run_llm_provider_query",
+                "label": f"Run LLM provider {provider}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for model, count in sorted((dashboard_summary.get("by_run_llm_model") or {}).items()):
+        model = str(model).strip()
+        if not model:
+            continue
+        command = _dashboard_query_command("evidence-run-llm-model", _dashboard_filter_value(model))
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "run_llm_model_query",
+                "label": f"Run LLM model {model}",
                 "command": command,
                 "matched_cases": int(count or 0),
             }
@@ -6844,6 +6946,8 @@ def build_evidence_dashboard(
             "by_node_status": all_cases["summary"]["by_node_status"],
             "by_critic_action": all_cases["summary"]["by_critic_action"],
             "by_memory_retrieval": all_cases["summary"]["by_memory_retrieval"],
+            "by_run_llm_provider": all_cases["summary"]["by_run_llm_provider"],
+            "by_run_llm_model": all_cases["summary"]["by_run_llm_model"],
             "by_llm_usage": all_cases["summary"]["by_llm_usage"],
             "by_learning_kind": all_cases["summary"]["by_learning_kind"],
             "by_learning_validation": all_cases["summary"]["by_learning_validation"],
@@ -6861,8 +6965,8 @@ def build_evidence_dashboard(
 
 def _render_dashboard_cases(query: dict[str, Any]) -> list[str]:
     lines = [
-        "| Run | Scenario | Category | Requires | Status | Skip Reason | Failure Layer | Policy Decisions | Skipped Stages | Policy Risk Flags | Policy Reasons | Policy Context Budget | Request Payload Stats | Node Status | Critic Actions | LLM Usage | Skills | Lineage | Match | Promotion Types | Promotion Targets | Diagnostics |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| Run | Scenario | Category | Requires | Status | Skip Reason | Failure Layer | Policy Decisions | Skipped Stages | Policy Risk Flags | Policy Reasons | Policy Context Budget | Request Payload Stats | Node Status | Critic Actions | Run LLM Provider | Run LLM Model | LLM Usage | Skills | Lineage | Match | Promotion Types | Promotion Targets | Diagnostics |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for case in query.get("cases", []):
         if not isinstance(case, dict):
@@ -6891,6 +6995,8 @@ def _render_dashboard_cases(query: dict[str, Any]) -> list[str]:
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('request_payload_stats_signals'))))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('node_status_signals'))))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('critic_action_signals'))))} | "
+            f"{_markdown_cell(case.get('run_llm_provider'))} | "
+            f"{_markdown_cell(case.get('run_llm_model'))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('llm_usage_signals'))))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('used_skills'))))} | "
             f"{_markdown_cell(_markdown_value_list(lineage_values))} | "
@@ -6901,7 +7007,7 @@ def _render_dashboard_cases(query: dict[str, Any]) -> list[str]:
         )
     if len(lines) == 2:
         lines.append(
-            "| - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |"
+            "| - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |"
         )
     return lines
 
@@ -6958,6 +7064,8 @@ def render_evidence_dashboard_markdown(payload: dict[str, Any]) -> str:
         _markdown_count_line("node_status", summary.get("by_node_status", {})),
         _markdown_count_line("critic_action", summary.get("by_critic_action", {})),
         _markdown_count_line("memory_retrieval", summary.get("by_memory_retrieval", {})),
+        _markdown_count_line("run_llm_provider", summary.get("by_run_llm_provider", {})),
+        _markdown_count_line("run_llm_model", summary.get("by_run_llm_model", {})),
         _markdown_count_line("llm_usage", summary.get("by_llm_usage", {})),
         _markdown_count_line("learning_kind", summary.get("by_learning_kind", {})),
         _markdown_count_line(
@@ -7120,11 +7228,13 @@ def _write_evidence_index_markdown(path: Path, payload: dict[str, Any]) -> None:
         _markdown_count_line("requires", summary.get("by_requires", {})),
         _markdown_count_line("skip_reason", summary.get("by_skip_reason", {})),
         _markdown_count_line("failure_layer", summary.get("by_failure_layer", {})),
+        _markdown_count_line("run_llm_provider", summary.get("by_run_llm_provider", {})),
+        _markdown_count_line("run_llm_model", summary.get("by_run_llm_model", {})),
         "",
         "## Cases",
         "",
-        "| Run | Scenario | Category | Requires | Status | Skip Reason | Failure Layer | Skills | Learning Evidence | Diagnostics |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| Run | Scenario | Category | Requires | Status | Skip Reason | Failure Layer | Run LLM Provider | Run LLM Model | Skills | Learning Evidence | Diagnostics |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for case in payload.get("cases", []):
         artifacts = case.get("artifacts") if isinstance(case.get("artifacts"), list) else []
@@ -7144,8 +7254,9 @@ def _write_evidence_index_markdown(path: Path, payload: dict[str, Any]) -> None:
         lines.append(
             f"| `{case.get('run_id')}` | `{case.get('scenario_id')}` | "
             f"{case.get('category')} | {requires} | {case.get('status')} | "
-            f"{case.get('skip_reason') or '-'} | {case.get('failure_layer')} | {skills} | "
-            f"{_learning_evidence_count(case)} | {diagnostics_link} |"
+            f"{case.get('skip_reason') or '-'} | {case.get('failure_layer')} | "
+            f"{case.get('run_llm_provider') or '-'} | {case.get('run_llm_model') or '-'} | "
+            f"{skills} | {_learning_evidence_count(case)} | {diagnostics_link} |"
         )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -7387,6 +7498,22 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--evidence-run-llm-provider",
+        action="append",
+        help=(
+            "Filter evidence query by run-level LLM provider recorded in summary metadata; "
+            "supports exact or glob matches"
+        ),
+    )
+    parser.add_argument(
+        "--evidence-run-llm-model",
+        action="append",
+        help=(
+            "Filter evidence query by run-level LLM model recorded in summary metadata; "
+            "supports exact or glob matches"
+        ),
+    )
+    parser.add_argument(
         "--evidence-llm-usage",
         action="append",
         help=(
@@ -7567,6 +7694,8 @@ def main(argv: list[str] | None = None) -> int:
             node_statuses=args.evidence_node_status,
             critic_actions=args.evidence_critic_action,
             memory_retrieval_signals=args.evidence_memory_retrieval,
+            run_llm_providers=args.evidence_run_llm_provider,
+            run_llm_models=args.evidence_run_llm_model,
             llm_usage_signals=args.evidence_llm_usage,
             learning_kinds=args.evidence_learning_kind,
             learning_validation_statuses=args.evidence_learning_validation,
