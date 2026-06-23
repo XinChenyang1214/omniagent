@@ -44,6 +44,7 @@ GENERAL_AGENT_USABILITY_TASK_TYPES = [
     "data_processing",
     "web_information",
 ]
+GENERAL_AGENT_USABILITY_TOOL_CHOICE_GLOB = "general_agent_usability_*_tool_choice"
 GENERAL_AGENT_USABILITY_REUSE_STATUSES = {
     "new_draft_needs_review",
     "verified_procedure_reuse",
@@ -450,6 +451,90 @@ def _general_agent_usability_evidence_audit(
     }
 
 
+def _general_agent_usability_run_command(
+    *,
+    dry_run: bool,
+    test_provider: bool = False,
+) -> str:
+    parts = []
+    if test_provider:
+        parts.append("OMNIAGENT_LLM_PROVIDER=test")
+    parts.extend(
+        [
+            "poetry",
+            "run",
+            "python",
+            "scripts/run_real_world_evals.py",
+            "--scenario-category",
+            GENERAL_AGENT_USABILITY_CATEGORY,
+            "--scenario-glob",
+            GENERAL_AGENT_USABILITY_TOOL_CHOICE_GLOB,
+            "--expect-selected-count",
+            str(len(GENERAL_AGENT_USABILITY_TASK_TYPES)),
+            "--run-root",
+            "eval_runs/general_agent_usability_real",
+        ]
+    )
+    if not test_provider:
+        parts.append("--require-real-llm")
+    if dry_run:
+        parts.append("--dry-run")
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+def _general_agent_usability_offline_command() -> str:
+    parts = [
+        "OMNIAGENT_LLM_PROVIDER=test",
+        "poetry",
+        "run",
+        "python",
+        "scripts/run_real_world_evals.py",
+        "--scenario-category",
+        GENERAL_AGENT_USABILITY_CATEGORY,
+        "--expect-selected-count",
+        str(len(GENERAL_AGENT_USABILITY_TASK_TYPES) * 3),
+        "--run-root",
+        "eval_runs/general_agent_usability_offline_latest",
+    ]
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+def _general_agent_usability_next_action(
+    *,
+    definition: dict[str, Any],
+    evidence: dict[str, Any],
+    missing: list[str],
+) -> dict[str, Any]:
+    offline_command = _general_agent_usability_offline_command()
+    preflight_command = _general_agent_usability_run_command(dry_run=True)
+    baseline_command = _general_agent_usability_run_command(dry_run=False)
+    if evidence.get("real_llm_baseline_ready"):
+        recommended = "none"
+        command = ""
+    elif not definition.get("scenario_definition_ready"):
+        recommended = "fix_scenario_definition"
+        command = "poetry run python scripts/run_real_world_evals.py --check-only"
+    elif not evidence.get("all_required_scenarios_passed"):
+        recommended = "run_offline_general_agent_usability_baseline"
+        command = offline_command
+    elif not evidence.get("real_llm_preflight_ready"):
+        recommended = "run_real_llm_tool_choice_preflight"
+        command = preflight_command
+    else:
+        recommended = "run_real_llm_tool_choice_baseline"
+        command = baseline_command
+    return {
+        "recommended": recommended,
+        "command": command,
+        "requires_user_confirmation": recommended == "run_real_llm_tool_choice_baseline",
+        "will_call_real_llm": recommended == "run_real_llm_tool_choice_baseline",
+        "missing": list(missing),
+        "offline_baseline_command": offline_command,
+        "real_llm_preflight_command": preflight_command,
+        "real_llm_baseline_command": baseline_command,
+    }
+
+
 def build_general_agent_usability_audit(
     scenarios: list[dict[str, Any]],
     evidence_index: dict[str, Any] | None = None,
@@ -466,12 +551,18 @@ def build_general_agent_usability_audit(
             missing.append("real_llm_tool_choice_preflight")
         missing.append("real_llm_tool_choice_baseline")
     complete = not missing
+    next_action = _general_agent_usability_next_action(
+        definition=definition,
+        evidence=evidence,
+        missing=missing,
+    )
     return {
         "schema_version": "general-agent-usability-audit/v1",
         "category": GENERAL_AGENT_USABILITY_CATEGORY,
         "complete": complete,
         "status": "complete" if complete else "incomplete",
         "missing": missing,
+        "next_action": next_action,
         "definition": definition,
         "evidence": evidence,
     }
@@ -480,6 +571,9 @@ def build_general_agent_usability_audit(
 def render_general_agent_usability_audit_markdown(payload: dict[str, Any]) -> str:
     definition = payload.get("definition") if isinstance(payload.get("definition"), dict) else {}
     evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+    next_action = (
+        payload.get("next_action") if isinstance(payload.get("next_action"), dict) else {}
+    )
     lines = [
         "# General Agent Usability Audit",
         "",
@@ -494,6 +588,13 @@ def render_general_agent_usability_audit_markdown(payload: dict[str, Any]) -> st
         f"- real_llm_baseline_ready: `{evidence.get('real_llm_baseline_ready')}`",
         f"- source_run_count: {evidence.get('source_run_count', 0)}",
         f"- total_index_cases: {evidence.get('total_index_cases', 0)}",
+        "",
+        "## Next Action",
+        "",
+        f"- recommended: `{next_action.get('recommended') or 'none'}`",
+        f"- command: `{next_action.get('command') or '-'}`",
+        f"- requires_user_confirmation: `{next_action.get('requires_user_confirmation')}`",
+        f"- will_call_real_llm: `{next_action.get('will_call_real_llm')}`",
         "",
         "## Task Types",
         "",

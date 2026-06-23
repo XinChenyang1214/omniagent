@@ -180,7 +180,7 @@ poetry run python scripts/run_real_world_evals.py --scenario-category general_ag
 poetry run python scripts/run_real_world_evals.py --scenario-category general_agent_usability --scenario-glob "general_agent_usability_*_tool_choice" --expect-selected-count 5 --require-real-llm --run-root eval_runs/general_agent_usability_real
 ```
 
-`--audit-general-agent-usability` 会同时检查 5 类任务的 learning sequence / tool-choice / permission boundary 定义覆盖、已有 passed evidence、真实 LLM dry-run preflight，以及真实 LLM tool-choice baseline 是否已经由非 dry-run、非 test provider 的 `llm_called` case 证明。当前真实 LLM baseline 未建立时，该审计应保持 incomplete；需要只生成报告而不让命令失败时使用 `--audit-allow-incomplete`。
+`--audit-general-agent-usability` 会同时检查 5 类任务的 learning sequence / tool-choice / permission boundary 定义覆盖、已有 passed evidence、真实 LLM dry-run preflight，以及真实 LLM tool-choice baseline 是否已经由非 dry-run、非 test provider 的 `llm_called` case 证明。当前真实 LLM baseline 未建立时，该审计应保持 incomplete，并在 `Next Action` 中输出需要用户确认的真实 baseline 命令；需要只生成报告而不让命令失败时使用 `--audit-allow-incomplete`。
 
 `summary.json` / `summary.md` 会记录 selector、dry-run / real-LLM guard 和不含密钥的 LLM provider / model 摘要，作为区分离线 test provider 与真实 provider 基线的审计证据。
 重新构建 evidence index 后，可按 run-level provider / model 直接查询真实基线证据：

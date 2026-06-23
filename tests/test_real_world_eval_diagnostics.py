@@ -928,6 +928,12 @@ def test_general_agent_usability_audit_reports_real_llm_gap() -> None:
         "real_llm_tool_choice_preflight",
         "real_llm_tool_choice_baseline",
     ]
+    assert audit["next_action"]["recommended"] == (
+        "run_offline_general_agent_usability_baseline"
+    )
+    assert "OMNIAGENT_LLM_PROVIDER=test" in audit["next_action"]["command"]
+    assert audit["next_action"]["requires_user_confirmation"] is False
+    assert "- recommended: `run_offline_general_agent_usability_baseline`" in markdown
     assert (
         "| `file_organization` | `True` | `False` | `False` | "
         "`False` | `False` | `False` |"
@@ -978,6 +984,11 @@ def test_general_agent_usability_audit_reports_ready_preflight_before_baseline()
 
     assert audit["complete"] is False
     assert audit["missing"] == ["real_llm_tool_choice_baseline"]
+    assert audit["next_action"]["recommended"] == "run_real_llm_tool_choice_baseline"
+    assert "--require-real-llm" in audit["next_action"]["command"]
+    assert "--dry-run" not in audit["next_action"]["command"]
+    assert audit["next_action"]["requires_user_confirmation"] is True
+    assert audit["next_action"]["will_call_real_llm"] is True
     assert audit["evidence"]["all_required_scenarios_passed"] is True
     assert audit["evidence"]["real_llm_preflight_ready"] is True
     assert audit["evidence"]["real_llm_baseline_ready"] is False
@@ -1021,6 +1032,10 @@ def test_general_agent_usability_audit_accepts_complete_real_llm_evidence() -> N
 
     assert audit["complete"] is True
     assert audit["missing"] == []
+    assert audit["next_action"]["recommended"] == "none"
+    assert audit["next_action"]["command"] == ""
+    assert audit["next_action"]["requires_user_confirmation"] is False
+    assert audit["next_action"]["will_call_real_llm"] is False
     assert audit["evidence"]["all_required_scenarios_passed"] is True
     assert audit["evidence"]["real_llm_preflight_ready"] is False
     assert audit["evidence"]["real_llm_baseline_ready"] is True
@@ -1055,6 +1070,7 @@ def test_general_agent_usability_audit_cli_allows_incomplete_report(
     output = output_path.read_text(encoding="utf-8")
     assert "real_llm_tool_choice_preflight" in output
     assert "real_llm_tool_choice_baseline" in output
+    assert "run_offline_general_agent_usability_baseline" in output
 
 
 def test_evidence_index_enriches_legacy_skipped_summary_with_scenario_metadata(
