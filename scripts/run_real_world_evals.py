@@ -36,6 +36,19 @@ TEXT_PREVIEW_SUFFIXES = {
     ".yml",
 }
 NON_REAL_LLM_PROVIDERS = {"", "test", "stub", "mock", "fake", "rule_based"}
+GENERAL_AGENT_USABILITY_CATEGORY = "general_agent_usability"
+GENERAL_AGENT_USABILITY_TASK_TYPES = [
+    "file_organization",
+    "information_synthesis",
+    "document_generation",
+    "data_processing",
+    "web_information",
+]
+GENERAL_AGENT_USABILITY_REUSE_STATUSES = {
+    "new_draft_needs_review",
+    "verified_procedure_reuse",
+    "correction_required",
+}
 
 
 def _load_json(path: Path) -> Any:
@@ -173,6 +186,308 @@ def _scenario_matches_run_selection(scenario: dict[str, Any], args: argparse.Nam
 
 def _matches_selector(value: str, selectors: list[str]) -> bool:
     return any(value == selector or fnmatch.fnmatchcase(value, selector) for selector in selectors)
+
+
+def _scenario_assertions(scenario: dict[str, Any]) -> dict[str, Any]:
+    assertions = scenario.get("assertions")
+    return assertions if isinstance(assertions, dict) else {}
+
+
+def _assertion_values(scenario: dict[str, Any], key: str) -> list[str]:
+    value = _scenario_assertions(scenario).get(key)
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item)]
+    if value is None:
+        return []
+    text = str(value)
+    return [text] if text else []
+
+
+def _assertion_bool(scenario: dict[str, Any], key: str) -> bool | None:
+    value = _scenario_assertions(scenario).get(key)
+    return value if isinstance(value, bool) else None
+
+
+def _general_agent_usability_path(scenario: dict[str, Any]) -> str | None:
+    if str(scenario.get("category") or "") != GENERAL_AGENT_USABILITY_CATEGORY:
+        return None
+    scenario_id = str(scenario.get("id") or "")
+    if scenario_id.endswith("_tool_choice"):
+        return "tool_choice"
+    if scenario_id.endswith("_permission_boundary"):
+        return "permission_boundary"
+    if str(scenario.get("kind") or "task") == "task_sequence":
+        return "learning_sequence"
+    return None
+
+
+def _scenario_has_all_values(
+    scenario: dict[str, Any], key: str, required: set[str]
+) -> bool:
+    return required.issubset(set(_assertion_values(scenario, key)))
+
+
+def _general_agent_usability_path_issues(
+    scenario: dict[str, Any],
+    path: str,
+) -> list[str]:
+    assertions = _scenario_assertions(scenario)
+    issues: list[str] = []
+    if not _assertion_values(scenario, "required_intake_task_type_any"):
+        issues.append("missing required_intake_task_type_any")
+    if not _assertion_values(scenario, "required_intake_tool_any"):
+        issues.append("missing required_intake_tool_any")
+    if not _assertion_values(scenario, "required_intake_validation_strategy_any"):
+        issues.append("missing required_intake_validation_strategy_any")
+
+    if path == "learning_sequence":
+        if str(scenario.get("kind") or "") != "task_sequence":
+            issues.append("learning sequence must use kind=task_sequence")
+        if int(assertions.get("min_successful_turns") or 0) < 3:
+            issues.append("learning sequence must require at least 3 successful turns")
+        if int(assertions.get("min_failed_turns") or 0) < 1:
+            issues.append("learning sequence must require at least 1 failed turn")
+        if not _scenario_has_all_values(
+            scenario,
+            "required_learning_feedback_reuse_status_all",
+            GENERAL_AGENT_USABILITY_REUSE_STATUSES,
+        ):
+            issues.append("learning sequence must require draft, reuse, and correction feedback")
+        if "validator_failure" not in _assertion_values(
+            scenario, "required_learning_correction_trigger_any"
+        ):
+            issues.append("learning sequence must require validator_failure correction")
+        if "correction_required" not in _assertion_values(
+            scenario, "required_learning_correction_review_status_any"
+        ):
+            issues.append("learning sequence must require correction_required review status")
+        if _assertion_bool(scenario, "required_intake_confirmation_required") is not False:
+            issues.append("learning sequence should not require confirmation for low-risk path")
+    elif path == "tool_choice":
+        if str(scenario.get("kind") or "task") != "task":
+            issues.append("tool-choice path must use kind=task")
+        if _assertion_bool(scenario, "must_succeed") is not True:
+            issues.append("tool-choice path must be a success path")
+        if "plan_required" not in _assertion_values(scenario, "required_policy_decision_any"):
+            issues.append("tool-choice path must require Planner routing")
+        if "planner_v1" not in _assertion_values(scenario, "required_llm_prompt_any"):
+            issues.append("tool-choice path must require planner_v1 prompt evidence")
+        if _assertion_bool(scenario, "required_intake_confirmation_required") is not False:
+            issues.append("tool-choice path should not require confirmation for low-risk path")
+    elif path == "permission_boundary":
+        if str(scenario.get("kind") or "task") != "task":
+            issues.append("permission boundary path must use kind=task")
+        if _assertion_bool(scenario, "must_not_succeed") is not True:
+            issues.append("permission boundary path must be blocked")
+        if not _assertion_values(scenario, "required_policy_risk_flag_any"):
+            issues.append("permission boundary path must require a policy risk flag")
+        if "permission" not in _assertion_values(scenario, "required_failure_layer_any"):
+            issues.append("permission boundary path must attribute failure to permission")
+        if "permission_denied" not in _assertion_values(
+            scenario, "required_experience_status_any"
+        ):
+            issues.append("permission boundary path must record permission_denied experience")
+        if _assertion_bool(scenario, "required_intake_confirmation_required") is not True:
+            issues.append("permission boundary path must require confirmation")
+    else:
+        issues.append(f"unsupported path {path}")
+    return issues
+
+
+def _general_agent_usability_definition_audit(
+    scenarios: list[dict[str, Any]],
+) -> dict[str, Any]:
+    paths = ["learning_sequence", "tool_choice", "permission_boundary"]
+    task_types: dict[str, dict[str, Any]] = {
+        task_type: {
+            "paths": {
+                path: {
+                    "ready": False,
+                    "scenario_id": None,
+                    "issues": ["missing scenario"],
+                }
+                for path in paths
+            }
+        }
+        for task_type in GENERAL_AGENT_USABILITY_TASK_TYPES
+    }
+    extra_scenarios: list[str] = []
+
+    for scenario in scenarios:
+        path = _general_agent_usability_path(scenario)
+        if not path:
+            continue
+        scenario_id = str(scenario.get("id") or "")
+        task_type_values = _assertion_values(scenario, "required_intake_task_type_any")
+        matched_known_task_type = False
+        for task_type in task_type_values:
+            if task_type not in task_types:
+                continue
+            matched_known_task_type = True
+            issues = _general_agent_usability_path_issues(scenario, path)
+            task_types[task_type]["paths"][path] = {
+                "ready": not issues,
+                "scenario_id": scenario_id,
+                "issues": issues,
+            }
+        if not matched_known_task_type:
+            extra_scenarios.append(scenario_id)
+
+    for task_type, record in task_types.items():
+        path_records = record["paths"]
+        record["ready"] = all(path_records[path]["ready"] for path in paths)
+        record["scenario_ids"] = [
+            str(path_records[path]["scenario_id"])
+            for path in paths
+            if path_records[path].get("scenario_id")
+        ]
+    definition_ready = all(record["ready"] for record in task_types.values())
+    return {
+        "required_task_types": GENERAL_AGENT_USABILITY_TASK_TYPES,
+        "required_paths": paths,
+        "scenario_definition_ready": definition_ready,
+        "task_type_count": len(task_types),
+        "ready_task_type_count": sum(1 for item in task_types.values() if item["ready"]),
+        "task_types": task_types,
+        "extra_scenarios": extra_scenarios,
+    }
+
+
+def _case_proves_real_llm_baseline(case: dict[str, Any]) -> bool:
+    provider = str(case.get("run_llm_provider") or "").strip().lower()
+    if provider in NON_REAL_LLM_PROVIDERS:
+        return False
+    if case.get("run_dry_run") is True:
+        return False
+    if case.get("run_real_llm_required") is not True:
+        return False
+    return (case.get("status") == "passed") and ("llm_called" in _llm_usage_signals(case))
+
+
+def _general_agent_usability_evidence_audit(
+    definition: dict[str, Any],
+    evidence_index: dict[str, Any] | None,
+) -> dict[str, Any]:
+    cases = (
+        [item for item in evidence_index.get("cases", []) if isinstance(item, dict)]
+        if isinstance(evidence_index, dict)
+        else []
+    )
+    cases_by_scenario: dict[str, list[dict[str, Any]]] = {}
+    for case in cases:
+        scenario_id = str(case.get("scenario_id") or "")
+        if scenario_id:
+            cases_by_scenario.setdefault(scenario_id, []).append(case)
+
+    task_type_records: dict[str, dict[str, Any]] = {}
+    for task_type, definition_record in definition.get("task_types", {}).items():
+        path_records = {}
+        for path, path_definition in definition_record.get("paths", {}).items():
+            scenario_id = path_definition.get("scenario_id")
+            scenario_cases = cases_by_scenario.get(str(scenario_id), []) if scenario_id else []
+            passed_cases = [case for case in scenario_cases if case.get("status") == "passed"]
+            real_llm_cases = [
+                case for case in scenario_cases if _case_proves_real_llm_baseline(case)
+            ]
+            path_records[path] = {
+                "scenario_id": scenario_id,
+                "passed": bool(passed_cases),
+                "passed_count": len(passed_cases),
+                "real_llm_passed": bool(real_llm_cases),
+                "real_llm_passed_count": len(real_llm_cases),
+            }
+        task_type_records[task_type] = {
+            "paths": path_records,
+            "all_paths_passed": all(item["passed"] for item in path_records.values()),
+            "tool_choice_real_llm_passed": path_records.get("tool_choice", {}).get(
+                "real_llm_passed",
+                False,
+            ),
+        }
+
+    evidence_available = isinstance(evidence_index, dict)
+    offline_or_any_evidence_ready = evidence_available and all(
+        record["all_paths_passed"] for record in task_type_records.values()
+    )
+    real_llm_baseline_ready = evidence_available and all(
+        record["tool_choice_real_llm_passed"] for record in task_type_records.values()
+    )
+    return {
+        "evidence_available": evidence_available,
+        "source_run_count": evidence_index.get("run_count", 0)
+        if isinstance(evidence_index, dict)
+        else 0,
+        "total_index_cases": len(cases),
+        "all_required_scenarios_passed": offline_or_any_evidence_ready,
+        "real_llm_baseline_ready": real_llm_baseline_ready,
+        "task_types": task_type_records,
+    }
+
+
+def build_general_agent_usability_audit(
+    scenarios: list[dict[str, Any]],
+    evidence_index: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    definition = _general_agent_usability_definition_audit(scenarios)
+    evidence = _general_agent_usability_evidence_audit(definition, evidence_index)
+    missing: list[str] = []
+    if not definition["scenario_definition_ready"]:
+        missing.append("scenario_definition")
+    if not evidence["all_required_scenarios_passed"]:
+        missing.append("passed_evidence_for_all_required_scenarios")
+    if not evidence["real_llm_baseline_ready"]:
+        missing.append("real_llm_tool_choice_baseline")
+    complete = not missing
+    return {
+        "schema_version": "general-agent-usability-audit/v1",
+        "category": GENERAL_AGENT_USABILITY_CATEGORY,
+        "complete": complete,
+        "status": "complete" if complete else "incomplete",
+        "missing": missing,
+        "definition": definition,
+        "evidence": evidence,
+    }
+
+
+def render_general_agent_usability_audit_markdown(payload: dict[str, Any]) -> str:
+    definition = payload.get("definition") if isinstance(payload.get("definition"), dict) else {}
+    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+    lines = [
+        "# General Agent Usability Audit",
+        "",
+        f"- status: `{payload.get('status')}`",
+        f"- complete: `{payload.get('complete')}`",
+        f"- missing: {_markdown_value_list(_string_values(payload.get('missing')))}",
+        f"- scenario_definition_ready: `{definition.get('scenario_definition_ready')}`",
+        f"- ready_task_types: {definition.get('ready_task_type_count', 0)}/{definition.get('task_type_count', 0)}",
+        f"- evidence_available: `{evidence.get('evidence_available')}`",
+        f"- all_required_scenarios_passed: `{evidence.get('all_required_scenarios_passed')}`",
+        f"- real_llm_baseline_ready: `{evidence.get('real_llm_baseline_ready')}`",
+        f"- source_run_count: {evidence.get('source_run_count', 0)}",
+        f"- total_index_cases: {evidence.get('total_index_cases', 0)}",
+        "",
+        "## Task Types",
+        "",
+        "| Task Type | Definition | Learning Evidence | Tool Choice Evidence | Real LLM Tool Choice | Permission Evidence |",
+        "|---|---|---|---|---|---|",
+    ]
+    evidence_task_types = (
+        evidence.get("task_types") if isinstance(evidence.get("task_types"), dict) else {}
+    )
+    for task_type in GENERAL_AGENT_USABILITY_TASK_TYPES:
+        definition_record = (definition.get("task_types") or {}).get(task_type, {})
+        evidence_record = evidence_task_types.get(task_type, {})
+        paths = evidence_record.get("paths") if isinstance(evidence_record.get("paths"), dict) else {}
+        learning = paths.get("learning_sequence", {})
+        tool_choice = paths.get("tool_choice", {})
+        permission = paths.get("permission_boundary", {})
+        lines.append(
+            f"| `{task_type}` | `{bool(definition_record.get('ready'))}` | "
+            f"`{bool(learning.get('passed'))}` | `{bool(tool_choice.get('passed'))}` | "
+            f"`{bool(tool_choice.get('real_llm_passed'))}` | "
+            f"`{bool(permission.get('passed'))}` |"
+        )
+    return "\n".join(lines) + "\n"
 
 
 def _current_llm_config_summary() -> dict[str, Any]:
@@ -7612,6 +7927,28 @@ def build_parser() -> argparse.ArgumentParser:
         default=10,
         help="Maximum cases per dashboard section (default: 10; use 0 for all)",
     )
+    parser.add_argument(
+        "--audit-general-agent-usability",
+        action="store_true",
+        help=(
+            "Audit general_agent_usability scenario coverage and evidence-index readiness "
+            "against the current initial-usability goal"
+        ),
+    )
+    parser.add_argument(
+        "--audit-json",
+        action="store_true",
+        help="Emit audit output as JSON instead of Markdown",
+    )
+    parser.add_argument(
+        "--audit-output",
+        help="Write audit output to this path instead of stdout",
+    )
+    parser.add_argument(
+        "--audit-allow-incomplete",
+        action="store_true",
+        help="Return exit code 0 for an incomplete audit report",
+    )
     parser.add_argument("--verbose", action="store_true")
     return parser
 
@@ -7646,8 +7983,55 @@ def main(argv: list[str] | None = None) -> int:
             f"failed={evidence_index_payload['failed']} "
             f"skipped={evidence_index_payload['skipped']}"
         )
-        if not args.query_evidence_index and not args.evidence_dashboard:
+        if (
+            not args.query_evidence_index
+            and not args.evidence_dashboard
+            and not args.audit_general_agent_usability
+        ):
             return 0
+    if args.audit_general_agent_usability:
+        if evidence_index_payload is None:
+            evidence_index_path = (
+                Path(args.evidence_index_input).resolve()
+                if args.evidence_index_input
+                else run_root / "evidence_index.json"
+            )
+            if evidence_index_path.exists():
+                loaded_payload = _load_json(evidence_index_path)
+                if not isinstance(loaded_payload, dict):
+                    print(
+                        f"evidence index is not a JSON object: {evidence_index_path}",
+                        file=sys.stderr,
+                    )
+                    return 2
+                evidence_index_payload = loaded_payload
+            elif args.evidence_index_input:
+                print(
+                    f"evidence index not found: {evidence_index_path}; "
+                    "run with --build-evidence-index first",
+                    file=sys.stderr,
+                )
+                return 2
+        scenarios = _normalize_scenarios(Path(args.scenarios).resolve())
+        audit_payload = build_general_agent_usability_audit(scenarios, evidence_index_payload)
+        if args.audit_json:
+            rendered = json.dumps(audit_payload, ensure_ascii=False, indent=2) + "\n"
+        else:
+            rendered = render_general_agent_usability_audit_markdown(audit_payload)
+        if args.audit_output:
+            output_path = Path(args.audit_output).resolve()
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(rendered, encoding="utf-8")
+            print(f"general_agent_usability_audit: {output_path}")
+            print(
+                f"status={audit_payload['status']} "
+                f"missing={','.join(audit_payload['missing']) or '-'}"
+            )
+        else:
+            print(rendered, end="")
+        if audit_payload["complete"] or args.audit_allow_incomplete:
+            return 0
+        return 2
     if args.query_evidence_index:
         if evidence_index_payload is None:
             evidence_index_path = (

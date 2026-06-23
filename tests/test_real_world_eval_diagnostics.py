@@ -911,6 +911,87 @@ def test_require_real_llm_rejects_test_provider_before_execution(
     assert not run_root.exists()
 
 
+def test_general_agent_usability_audit_reports_real_llm_gap() -> None:
+    scenarios = evals._normalize_scenarios(evals.DEFAULT_SCENARIOS)
+
+    audit = evals.build_general_agent_usability_audit(scenarios, {"cases": []})
+    markdown = evals.render_general_agent_usability_audit_markdown(audit)
+
+    assert audit["status"] == "incomplete"
+    assert audit["definition"]["scenario_definition_ready"] is True
+    assert audit["definition"]["ready_task_type_count"] == 5
+    assert audit["evidence"]["all_required_scenarios_passed"] is False
+    assert audit["evidence"]["real_llm_baseline_ready"] is False
+    assert audit["missing"] == [
+        "passed_evidence_for_all_required_scenarios",
+        "real_llm_tool_choice_baseline",
+    ]
+    assert "| `file_organization` | `True` | `False` | `False` | `False` | `False` |" in markdown
+
+
+def test_general_agent_usability_audit_accepts_complete_real_llm_evidence() -> None:
+    scenarios = evals._normalize_scenarios(evals.DEFAULT_SCENARIOS)
+    definition = evals._general_agent_usability_definition_audit(scenarios)
+    cases = []
+    for task_type, record in definition["task_types"].items():
+        for path, path_record in record["paths"].items():
+            scenario_id = path_record["scenario_id"]
+            case = {
+                "scenario_id": scenario_id,
+                "category": "general_agent_usability",
+                "status": "passed",
+                "failure_layer": "none",
+                "run_llm_provider": "test",
+                "run_llm_model": "deterministic",
+                "run_dry_run": False,
+                "run_real_llm_required": False,
+                "llm_call_count": 0,
+                "llm_total_tokens": 0,
+            }
+            if path == "tool_choice":
+                case.update(
+                    {
+                        "run_llm_provider": "openai",
+                        "run_llm_model": f"real-model-{task_type}",
+                        "run_real_llm_required": True,
+                        "llm_call_count": 1,
+                        "llm_total_tokens": 100,
+                    }
+                )
+            cases.append(case)
+
+    audit = evals.build_general_agent_usability_audit(
+        scenarios,
+        {"run_count": 1, "cases": cases},
+    )
+
+    assert audit["complete"] is True
+    assert audit["missing"] == []
+    assert audit["evidence"]["all_required_scenarios_passed"] is True
+    assert audit["evidence"]["real_llm_baseline_ready"] is True
+
+
+def test_general_agent_usability_audit_cli_allows_incomplete_report(
+    tmp_path: Path, capsys
+) -> None:
+    output_path = tmp_path / "audit.md"
+
+    exit_code = evals.main(
+        [
+            "--audit-general-agent-usability",
+            "--audit-output",
+            str(output_path),
+            "--audit-allow-incomplete",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "status=incomplete" in captured.out
+    assert output_path.exists()
+    assert "real_llm_tool_choice_baseline" in output_path.read_text(encoding="utf-8")
+
+
 def test_evidence_index_enriches_legacy_skipped_summary_with_scenario_metadata(
     tmp_path: Path,
 ) -> None:
