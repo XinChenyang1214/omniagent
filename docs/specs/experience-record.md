@@ -1,15 +1,15 @@
 # Experience Record Spec
 
-Last reviewed: 2026-06-12
+Last reviewed: 2026-07-31
 
 ## 文档状态
 
 - Document type: spec
 - Workstream: `META-010`
-- Document status: confirmed
+- Document status: active
 - Implementation status: implemented
 - Authority scope: 任务经验记录的最小数据契约、写入时机和学习升级边界
-- Parent workstream: [`AGENT_USABILITY_LEARNING_LOOP_MVP.md`](../workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md)
+- Completion evidence: [`AGENT_USABILITY_LEARNING_LOOP_MVP.md`](../workstreams/completed/AGENT_USABILITY_LEARNING_LOOP_MVP.md)
 
 ## 目标
 

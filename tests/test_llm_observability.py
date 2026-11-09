@@ -27,6 +27,7 @@ from unittest.mock import patch
 
 from omniagent.cli import main
 from omniagent.config import AppConfig
+from omniagent.errors import ErrorCode, OmniAgentError
 from omniagent.gateway import RuntimeGateway
 from omniagent.models import LLMResponse
 from omniagent.workspace import TaskArtifactManager, WorkspaceManager
@@ -527,6 +528,90 @@ class CLILLMStatsCommandTest(unittest.TestCase):
         self.assertEqual(payload["threads_scanned"], 0)
         # tasks_scanned should also be 0 because --thread-id narrows scope
         self.assertEqual(payload["tasks_scanned"], 0)
+
+    def test_llm_check_handles_health_error_without_traceback(self) -> None:
+        def fail_health_check(self: RuntimeGateway) -> dict[str, object]:
+            raise OmniAgentError(
+                ErrorCode.LLM_ERROR,
+                "LLM 调用失败 (openai): HTTP Error 401: Unauthorized",
+                details={
+                    "provider": "openai",
+                    "model": "qwen3.6-plus",
+                    "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+                },
+            )
+
+        with patch.object(RuntimeGateway, "check_llm", fail_health_check):
+            exit_code, output = self._run_cli(["llm", "check"])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("healthy: False", output)
+        self.assertIn("provider: openai", output)
+        self.assertIn("model: qwen3.6-plus", output)
+        self.assertIn("error_code: llm_error", output)
+        self.assertIn("HTTP Error 401", output)
+        self.assertIn("diagnosis: llm_authentication_failed", output)
+        self.assertIn("next_action: Check OMNIAGENT_LLM_API_KEY", output)
+        self.assertIn("next_action: Confirm model qwen3.6-plus", output)
+        self.assertNotIn("Traceback", output)
+
+    def test_llm_check_json_mode_reports_health_error(self) -> None:
+        def fail_health_check(self: RuntimeGateway) -> dict[str, object]:
+            raise OmniAgentError(
+                ErrorCode.LLM_ERROR,
+                "LLM 调用失败 (openai): HTTP Error 401: Unauthorized",
+                details={"provider": "openai"},
+            )
+
+        with patch.object(RuntimeGateway, "check_llm", fail_health_check):
+            exit_code, output = self._run_cli(["llm", "check", "--json"])
+
+        self.assertEqual(exit_code, 1)
+        payload = json.loads(output)
+        self.assertFalse(payload["healthy"])
+        self.assertEqual(payload["error"]["code"], "llm_error")
+        self.assertIn("HTTP Error 401", payload["error"]["message"])
+        self.assertEqual(payload["diagnosis"], "llm_authentication_failed")
+        self.assertIn(
+            "Check OMNIAGENT_LLM_API_KEY",
+            " ".join(payload["next_actions"]),
+        )
+
+    def test_llm_check_openrouter_auth_error_names_dedicated_key(self) -> None:
+        def fail_health_check(self: RuntimeGateway) -> dict[str, object]:
+            raise OmniAgentError(
+                ErrorCode.LLM_ERROR,
+                "LLM 调用失败 (openrouter): HTTP Error 401: Unauthorized",
+                details={"provider": "openrouter", "model": "openrouter/free"},
+            )
+
+        with patch.object(RuntimeGateway, "check_llm", fail_health_check):
+            exit_code, output = self._run_cli(["llm", "check", "--json"])
+
+        self.assertEqual(exit_code, 1)
+        payload = json.loads(output)
+        self.assertIn(
+            "Check OPENROUTER_API_KEY (or OMNIAGENT_LLM_API_KEY)",
+            " ".join(payload["next_actions"]),
+        )
+
+    def test_llm_check_opencode_auth_error_names_dedicated_key(self) -> None:
+        def fail_health_check(self: RuntimeGateway) -> dict[str, object]:
+            raise OmniAgentError(
+                ErrorCode.LLM_ERROR,
+                "LLM 调用失败 (opencode): HTTP Error 401: Unauthorized",
+                details={"provider": "opencode", "model": "deepseek-v4-flash-free"},
+            )
+
+        with patch.object(RuntimeGateway, "check_llm", fail_health_check):
+            exit_code, output = self._run_cli(["llm", "check", "--json"])
+
+        self.assertEqual(exit_code, 1)
+        payload = json.loads(output)
+        self.assertIn(
+            "Check OPENCODE_API_KEY (or OMNIAGENT_LLM_API_KEY)",
+            " ".join(payload["next_actions"]),
+        )
 
 
 # ---------------------------------------------------------------------------

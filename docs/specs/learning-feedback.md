@@ -1,15 +1,15 @@
 # Learning Feedback Spec
 
-Last reviewed: 2026-06-15
+Last reviewed: 2026-07-31
 
 ## 文档状态
 
 - Document type: spec
 - Workstream: `META-010` / Learning feedback
-- Document status: confirmed
+- Document status: active
 - Implementation status: verified
 - Authority scope: 任务结束后向用户展示 learning loop 状态的最小数据契约和输出规则
-- Parent workstream: [`AGENT_USABILITY_LEARNING_LOOP_MVP.md`](../workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md)
+- Completion evidence: [`AGENT_USABILITY_LEARNING_LOOP_MVP.md`](../workstreams/completed/AGENT_USABILITY_LEARNING_LOOP_MVP.md)
 
 ## 目标
 

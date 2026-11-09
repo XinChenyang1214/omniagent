@@ -14,6 +14,184 @@ evals = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(evals)
 
 
+def _objective_requirements_by_key(audit: dict[str, object]) -> dict[str, dict[str, object]]:
+    requirements = audit.get("objective_requirements")
+    assert isinstance(requirements, list)
+    return {
+        str(record.get("requirement")): record
+        for record in requirements
+        if isinstance(record, dict)
+    }
+
+
+def _append_learning_governance_evidence_cases(cases: list[dict[str, object]]) -> None:
+    cases.append(
+        {
+            "run_id": "learning",
+            "scenario_id": "learning_loop_feedback_sequence",
+            "category": "learning_loop",
+            "status": "passed",
+            "failure_layer": "none",
+            "used_skills": ["builtin.file.basic"],
+            "learning_evidence": {
+                "procedure_matches": [
+                    {
+                        "matched": True,
+                        "procedure_id": "proc_feedback",
+                        "status": "habit",
+                        "confidence": 0.8,
+                        "reason": "matched trigger pattern with score 0.80",
+                        "suggestion_mode": "habit_fast_path_candidate",
+                        "required_confirmation": False,
+                    }
+                ],
+                "habit_fast_paths": [
+                    {
+                        "decision": "habit_fast_path_candidate",
+                        "habit_id": "proc_feedback",
+                        "validator_evidence_refs": [
+                            "tasks/task_feedback/completion/evaluation.json"
+                        ],
+                    }
+                ],
+            },
+        }
+    )
+    cases.append(
+        {
+            "run_id": "learning",
+            "scenario_id": "learning_loop_correction_recovery",
+            "category": "learning_loop",
+            "status": "passed",
+            "failure_layer": "none",
+            "used_skills": ["builtin.file.basic"],
+            "learning_evidence": {
+                "procedure_matches": [
+                    {
+                        "matched": False,
+                        "procedure_id": None,
+                        "confidence": 0.0,
+                        "reason": "no procedure matched",
+                        "suggestion_mode": "fallback_to_planner",
+                        "rejected_candidate_count": 1,
+                        "rejected_candidates": [
+                            {
+                                "procedure_id": "proc_recovery",
+                                "status": "draft",
+                                "reason": "procedure requires correction review before reuse",
+                            }
+                        ],
+                    }
+                ],
+                "learning_corrections": [
+                    {
+                        "trigger": "validator_failure",
+                        "object_type": "procedure",
+                        "procedure_id": "proc_recovery",
+                        "frozen": True,
+                    }
+                ],
+                "procedure_memory_records": [
+                    {
+                        "procedure_id": "proc_recovery",
+                        "object_type": "procedure",
+                        "status": "verified",
+                        "review_status": "approved",
+                        "review_decisions": ["approved", "approved"],
+                        "audit_events": [
+                            "created_from_experience",
+                            "reviewed",
+                            "promoted_to_verified",
+                            "validator_failed",
+                            "reviewed",
+                            "promoted_to_verified",
+                        ],
+                    }
+                ],
+            },
+        }
+    )
+    cases.append(
+        {
+            "run_id": "learning",
+            "scenario_id": "learning_loop_jsonl_habit_promoted_skill_lineage",
+            "category": "learning_loop",
+            "status": "passed",
+            "failure_layer": "none",
+            "used_skills": ["generated.habit.eval_jsonl_events"],
+            "learning_evidence": {
+                "skill_lineages": [
+                    {
+                        "skill_name": "generated.habit.eval_jsonl_events",
+                        "habit_id": "proc_eval_jsonl_habit",
+                        "procedure_id": "proc_eval_jsonl_habit",
+                        "generation_type": "json",
+                        "source_targets": ["jsonl"],
+                    }
+                ],
+                "skill_lifecycle_records": [
+                    {
+                        "skill_name": "generated.habit.eval_jsonl_events",
+                        "lifecycle_status": "active",
+                    }
+                ],
+            },
+        }
+    )
+
+
+def _general_learning_sequence_evidence(task_type: str) -> dict[str, object]:
+    return {
+        "learning_feedbacks": [
+            {
+                "reuse_status": "new_draft_needs_review",
+                "learnable": True,
+                "summary_line_count": 4,
+                "path": f"tasks/{task_type}_draft/learning/feedback.json",
+            },
+            {
+                "reuse_status": "verified_procedure_reuse",
+                "learnable": True,
+                "summary_line_count": 4,
+                "path": f"tasks/{task_type}_reuse/learning/feedback.json",
+            },
+            {
+                "reuse_status": "correction_required",
+                "learnable": False,
+                "summary_line_count": 5,
+                "path": f"tasks/{task_type}_correction/learning/feedback.json",
+            },
+        ],
+        "procedure_matches": [
+            {
+                "matched": False,
+                "procedure_id": None,
+                "confidence": 0.0,
+                "reason": "no procedure matched",
+                "suggestion_mode": "fallback_to_planner",
+                "rejected_candidate_count": 0,
+            },
+            {
+                "matched": True,
+                "procedure_id": f"proc_{task_type}",
+                "status": "verified",
+                "confidence": 0.8,
+                "reason": "matched trigger pattern with score 0.80",
+                "suggestion_mode": "validator_required",
+                "required_confirmation": True,
+            },
+        ],
+        "learning_corrections": [
+            {
+                "trigger": "validator_failure",
+                "object_type": "procedure",
+                "procedure_id": f"proc_{task_type}",
+                "frozen": True,
+            }
+        ],
+    }
+
+
 def test_router_misroute_gets_routing_diagnosis_and_layer() -> None:
     issues = [
         "scenario expected every task turn to succeed",
@@ -40,6 +218,48 @@ def test_router_misroute_gets_routing_diagnosis_and_layer() -> None:
 
     assert diagnosis == "router_or_interaction_dispatch"
     assert evals._failure_layer(diagnosis) == "routing"
+
+
+def test_llm_error_gets_configuration_diagnosis_before_planner() -> None:
+    issues = [
+        "scenario expected every task turn to succeed",
+        "missing file: archive/alpha.txt",
+        "missing required skill usage; expected any of ['builtin.file.basic'], got []",
+        "missing required LLM prompt; expected any of ['planner_v1'], got []",
+    ]
+    executions = [
+        {
+            "json": {
+                "task": {
+                    "status": "failed",
+                    "error_code": "llm_error",
+                    "error_message": "LLM 调用失败 (openai): HTTP Error 401: Unauthorized",
+                },
+                "result": {
+                    "success": False,
+                    "status": "failed",
+                    "error_code": "llm_error",
+                },
+            },
+            "timed_out": False,
+        }
+    ]
+    evidence = {
+        "experience_records": [
+            {
+                "status": "failed",
+                "failure_layer": "planner",
+                "error_code": "llm_error",
+            }
+        ],
+        "permissions": [],
+        "node_statuses": [],
+    }
+
+    diagnosis = evals._diagnose(issues, executions, evidence)
+
+    assert diagnosis == "llm_call_or_configuration"
+    assert evals._failure_layer(diagnosis) == "infrastructure"
 
 
 def test_extract_turn_summaries_captures_route_task_and_response() -> None:
@@ -808,9 +1028,7 @@ def test_dry_run_writes_selection_summary_without_executing(tmp_path: Path, caps
     assert len(run_dirs) == 1
     summary = json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
     assert summary["selected"] == 1
-    assert summary["metadata"]["selection"]["scenario_category"] == [
-        "general_agent_usability"
-    ]
+    assert summary["metadata"]["selection"]["scenario_category"] == ["general_agent_usability"]
     assert summary["metadata"]["selection"]["scenario_glob"] == ["*_tool_choice"]
     assert summary["metadata"]["execution"]["dry_run"] is True
     assert summary["metadata"]["llm"]["provider"]
@@ -819,9 +1037,7 @@ def test_dry_run_writes_selection_summary_without_executing(tmp_path: Path, caps
     assert not (run_dirs[0] / "workspaces").exists()
 
 
-def test_expected_selected_count_mismatch_fails_before_execution(
-    tmp_path: Path, capsys
-) -> None:
+def test_expected_selected_count_mismatch_fails_before_execution(tmp_path: Path, capsys) -> None:
     scenario_path = tmp_path / "scenarios.json"
     run_root = tmp_path / "runs"
     scenario_path.write_text(
@@ -911,11 +1127,91 @@ def test_require_real_llm_rejects_test_provider_before_execution(
     assert not run_root.exists()
 
 
+def test_real_llm_health_check_fails_before_scenario_execution(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    scenario_path = tmp_path / "scenarios.json"
+    run_root = tmp_path / "runs"
+    scenario_path.write_text(
+        json.dumps(
+            {
+                "scenarios": [
+                    {
+                        "id": "general_agent_usability_file_organization_tool_choice",
+                        "category": "general_agent_usability",
+                        "kind": "task",
+                        "goal": "copy inputs/a.txt to outputs/a.txt",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OMNIAGENT_LLM_PROVIDER", "openai")
+    monkeypatch.setattr(
+        evals,
+        "_real_llm_health_check",
+        lambda: {
+            "healthy": False,
+            "error": {"code": "llm_error", "message": "invalid_api_key"},
+        },
+    )
+
+    exit_code = evals.main(
+        [
+            "--scenarios",
+            str(scenario_path),
+            "--run-root",
+            str(run_root),
+            "--scenario-category",
+            "general_agent_usability",
+            "--expect-selected-count",
+            "1",
+            "--require-real-llm",
+            "--real-llm-health-check",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "real_llm_health_check_failed" in captured.err
+    run_dirs = list(run_root.iterdir())
+    assert len(run_dirs) == 1
+    summary = json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
+    assert summary["selected"] == 1
+    assert summary["metadata"]["execution"]["real_llm_health_check"] is True
+    assert summary["metadata"]["llm_health_check"]["healthy"] is False
+    assert summary["metadata"]["llm_health_check"]["error"]["message"] == "invalid_api_key"
+    summary_markdown = (run_dirs[0] / "summary.md").read_text(encoding="utf-8")
+    assert "- execution.real_llm_health_check: `True`" in summary_markdown
+    assert "- llm_health_check.healthy: `False`" in summary_markdown
+    assert "- llm_health_check.error_message: `invalid_api_key`" in summary_markdown
+    assert not (run_dirs[0] / "workspaces").exists()
+
+
+def test_real_llm_health_check_requires_real_llm_flag(tmp_path: Path, capsys) -> None:
+    exit_code = evals.main(
+        [
+            "--scenarios",
+            str(tmp_path / "missing.json"),
+            "--run-root",
+            str(tmp_path / "runs"),
+            "--real-llm-health-check",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "--real-llm-health-check requires --require-real-llm" in captured.err
+
+
 def test_general_agent_usability_audit_reports_real_llm_gap() -> None:
     scenarios = evals._normalize_scenarios(evals.DEFAULT_SCENARIOS)
 
     audit = evals.build_general_agent_usability_audit(scenarios, {"cases": []})
     markdown = evals.render_general_agent_usability_audit_markdown(audit)
+    requirements = _objective_requirements_by_key(audit)
 
     assert audit["status"] == "incomplete"
     assert audit["definition"]["scenario_definition_ready"] is True
@@ -925,26 +1221,73 @@ def test_general_agent_usability_audit_reports_real_llm_gap() -> None:
     assert audit["evidence"]["real_llm_baseline_ready"] is False
     assert audit["missing"] == [
         "passed_evidence_for_all_required_scenarios",
+        "learning_governance_evidence",
         "real_llm_tool_choice_preflight",
         "real_llm_tool_choice_baseline",
     ]
-    assert audit["next_action"]["recommended"] == (
-        "run_offline_general_agent_usability_baseline"
-    )
+    assert audit["next_action"]["recommended"] == ("run_offline_general_agent_usability_baseline")
     assert "OMNIAGENT_LLM_PROVIDER=test" in audit["next_action"]["command"]
     assert audit["next_action"]["requires_user_confirmation"] is False
+    assert set(requirements) == set(evals.GENERAL_AGENT_USABILITY_OBJECTIVE_REQUIREMENTS)
+    assert requirements["five_task_types"]["passed"] is True
+    assert requirements["intake_understands_type_risk_tool_validation"]["passed"] is True
+    assert requirements["success_failure_permission_reuse_per_task_type"]["passed"] is False
+    assert requirements["real_llm_tool_choice_baseline"]["passed"] is False
+    assert "## Objective Requirements" in markdown
     assert "- recommended: `run_offline_general_agent_usability_baseline`" in markdown
     assert (
-        "| `file_organization` | `True` | `False` | `False` | "
-        "`False` | `False` | `False` |"
+        "| `file_organization` | `True` | `False` | `False` | `False` | "
+        "`False` | `False` | `False` | `False` |"
     ) in markdown
+
+
+def test_general_agent_usability_definition_audit_reports_required_facets() -> None:
+    scenarios = evals._normalize_scenarios(evals.DEFAULT_SCENARIOS)
+
+    definition = evals._general_agent_usability_definition_audit(scenarios)
+
+    assert definition["required_facets"] == [
+        "success_path",
+        "failure_path",
+        "learning_reuse",
+        "permission_boundary",
+    ]
+    for task_type, record in definition["task_types"].items():
+        assert record["ready"], task_type
+        capabilities = record["capabilities"]
+        assert capabilities["success_path"]["source_path"] == "tool_choice"
+        assert capabilities["success_path"]["ready"] is True
+        assert capabilities["failure_path"]["source_path"] == "learning_sequence"
+        assert capabilities["failure_path"]["ready"] is True
+        assert capabilities["learning_reuse"]["source_path"] == "learning_sequence"
+        assert capabilities["learning_reuse"]["ready"] is True
+        assert capabilities["permission_boundary"]["source_path"] == "permission_boundary"
+        assert capabilities["permission_boundary"]["ready"] is True
+
+
+def test_general_agent_usability_definition_audit_requires_intake_risk_level() -> None:
+    scenarios = json.loads(json.dumps(evals._normalize_scenarios(evals.DEFAULT_SCENARIOS)))
+    target = next(
+        scenario
+        for scenario in scenarios
+        if evals._general_agent_usability_path(scenario) == "tool_choice"
+    )
+    target["assertions"].pop("required_intake_risk_level_any")
+
+    definition = evals._general_agent_usability_definition_audit(scenarios)
+
+    task_type = target["assertions"]["required_intake_task_type_any"][0]
+    path_record = definition["task_types"][task_type]["paths"]["tool_choice"]
+    assert definition["scenario_definition_ready"] is False
+    assert path_record["ready"] is False
+    assert "missing required_intake_risk_level_any" in path_record["issues"]
 
 
 def test_general_agent_usability_audit_reports_ready_preflight_before_baseline() -> None:
     scenarios = evals._normalize_scenarios(evals.DEFAULT_SCENARIOS)
     definition = evals._general_agent_usability_definition_audit(scenarios)
     cases = []
-    for record in definition["task_types"].values():
+    for task_type, record in definition["task_types"].items():
         for path, path_record in record["paths"].items():
             scenario_id = path_record["scenario_id"]
             cases.append(
@@ -961,6 +1304,76 @@ def test_general_agent_usability_audit_reports_ready_preflight_before_baseline()
                     "llm_total_tokens": 0,
                 }
             )
+            if path == "learning_sequence":
+                cases[-1]["learning_evidence"] = _general_learning_sequence_evidence(task_type)
+            if path == "tool_choice":
+                cases.append(
+                    {
+                        "scenario_id": scenario_id,
+                        "category": "general_agent_usability",
+                        "status": "selected",
+                        "failure_layer": "none",
+                        "run_llm_provider": "openai",
+                        "run_llm_model": "real-model",
+                        "run_dry_run": True,
+                        "run_real_llm_required": True,
+                        "llm_call_count": 0,
+                        "llm_total_tokens": 0,
+                    }
+                )
+    _append_learning_governance_evidence_cases(cases)
+
+    audit = evals.build_general_agent_usability_audit(
+        scenarios,
+        {"run_count": 2, "cases": cases},
+    )
+    requirements = _objective_requirements_by_key(audit)
+
+    assert audit["complete"] is False
+    assert audit["missing"] == ["real_llm_tool_choice_baseline"]
+    assert audit["next_action"]["recommended"] == "run_real_llm_tool_choice_baseline"
+    assert "--require-real-llm" in audit["next_action"]["command"]
+    assert "--real-llm-health-check" in audit["next_action"]["command"]
+    assert "--dry-run" not in audit["next_action"]["command"]
+    assert audit["next_action"]["requires_user_confirmation"] is True
+    assert audit["next_action"]["will_call_real_llm"] is True
+    assert audit["evidence"]["all_required_scenarios_passed"] is True
+    assert audit["evidence"]["real_llm_preflight_ready"] is True
+    assert audit["evidence"]["real_llm_baseline_ready"] is False
+    for record in audit["evidence"]["task_types"].values():
+        assert record["success_path_passed"] is True
+        assert record["failure_path_passed"] is True
+        assert record["learning_reuse_passed"] is True
+        assert record["permission_boundary_passed"] is True
+    for requirement, record in requirements.items():
+        if requirement == "real_llm_tool_choice_baseline":
+            assert record["passed"] is False
+        else:
+            assert record["passed"] is True
+
+
+def test_general_agent_usability_audit_requires_learning_governance_evidence() -> None:
+    scenarios = evals._normalize_scenarios(evals.DEFAULT_SCENARIOS)
+    definition = evals._general_agent_usability_definition_audit(scenarios)
+    cases = []
+    for task_type, record in definition["task_types"].items():
+        for path, path_record in record["paths"].items():
+            scenario_id = path_record["scenario_id"]
+            case = {
+                "scenario_id": scenario_id,
+                "category": "general_agent_usability",
+                "status": "passed",
+                "failure_layer": "none",
+                "run_llm_provider": "test",
+                "run_llm_model": "deterministic",
+                "run_dry_run": False,
+                "run_real_llm_required": False,
+                "llm_call_count": 0,
+                "llm_total_tokens": 0,
+            }
+            if path == "learning_sequence":
+                case["learning_evidence"] = _general_learning_sequence_evidence(task_type)
+            cases.append(case)
             if path == "tool_choice":
                 cases.append(
                     {
@@ -981,17 +1394,180 @@ def test_general_agent_usability_audit_reports_ready_preflight_before_baseline()
         scenarios,
         {"run_count": 2, "cases": cases},
     )
+    markdown = evals.render_general_agent_usability_audit_markdown(audit)
 
     assert audit["complete"] is False
+    assert audit["missing"] == [
+        "learning_governance_evidence",
+        "real_llm_tool_choice_baseline",
+    ]
+    assert audit["evidence"]["all_required_scenarios_passed"] is True
+    assert audit["evidence"]["learning_governance_ready"] is False
+    assert audit["next_action"]["recommended"] == "run_learning_governance_baseline"
+    assert "learning_loop_feedback_sequence" in audit["next_action"]["command"]
+    assert audit["next_action"]["requires_user_confirmation"] is False
+    assert "| `reuse_refusal_explanation` | `False` | `0` | - |" in markdown
+
+
+def test_general_agent_usability_audit_surfaces_real_llm_configuration_blocker() -> None:
+    scenarios = evals._normalize_scenarios(evals.DEFAULT_SCENARIOS)
+    definition = evals._general_agent_usability_definition_audit(scenarios)
+    cases = []
+    for task_type, record in definition["task_types"].items():
+        for path, path_record in record["paths"].items():
+            scenario_id = path_record["scenario_id"]
+            cases.append(
+                {
+                    "run_id": "offline",
+                    "scenario_id": scenario_id,
+                    "category": "general_agent_usability",
+                    "status": "passed",
+                    "failure_layer": "none",
+                    "run_llm_provider": "test",
+                    "run_llm_model": "deterministic",
+                    "run_dry_run": False,
+                    "run_real_llm_required": False,
+                    "llm_call_count": 0,
+                    "llm_total_tokens": 0,
+                }
+            )
+            if path == "learning_sequence":
+                cases[-1]["learning_evidence"] = _general_learning_sequence_evidence(task_type)
+            if path == "tool_choice":
+                cases.append(
+                    {
+                        "run_id": "20260623_023645",
+                        "scenario_id": scenario_id,
+                        "category": "general_agent_usability",
+                        "status": "selected",
+                        "failure_layer": "none",
+                        "run_llm_provider": "openai",
+                        "run_llm_model": "real-model",
+                        "run_dry_run": True,
+                        "run_real_llm_required": True,
+                        "llm_call_count": 0,
+                        "llm_total_tokens": 0,
+                    }
+                )
+                cases.append(
+                    {
+                        "run_id": "20260623_031821",
+                        "run_dir": "/tmp/eval_runs/20260623_031821",
+                        "scenario_id": scenario_id,
+                        "category": "general_agent_usability",
+                        "status": "failed",
+                        "diagnosis": "llm_call_or_configuration",
+                        "failure_layer": "infrastructure",
+                        "issues": ["LLM 调用失败: HTTP Error 401: Unauthorized"],
+                        "run_llm_provider": "openai",
+                        "run_llm_model": "real-model",
+                        "run_dry_run": False,
+                        "run_real_llm_required": True,
+                        "llm_call_count": 0,
+                        "llm_total_tokens": 0,
+                    }
+                )
+    _append_learning_governance_evidence_cases(cases)
+
+    audit = evals.build_general_agent_usability_audit(
+        scenarios,
+        {"run_count": 3, "cases": cases},
+    )
+    markdown = evals.render_general_agent_usability_audit_markdown(audit)
+
+    blocker = audit["evidence"]["latest_real_llm_blocking_failure"]
+    assert audit["complete"] is False
     assert audit["missing"] == ["real_llm_tool_choice_baseline"]
-    assert audit["next_action"]["recommended"] == "run_real_llm_tool_choice_baseline"
-    assert "--require-real-llm" in audit["next_action"]["command"]
-    assert "--dry-run" not in audit["next_action"]["command"]
-    assert audit["next_action"]["requires_user_confirmation"] is True
-    assert audit["next_action"]["will_call_real_llm"] is True
     assert audit["evidence"]["all_required_scenarios_passed"] is True
     assert audit["evidence"]["real_llm_preflight_ready"] is True
     assert audit["evidence"]["real_llm_baseline_ready"] is False
+    assert blocker["run_id"] == "20260623_031821"
+    assert blocker["case_count"] == 5
+    assert blocker["diagnoses"] == ["llm_call_or_configuration"]
+    assert audit["next_action"]["recommended"] == "fix_real_llm_configuration"
+    assert audit["next_action"]["command"] == (
+        "poetry run omniagent --workspace ./workspace llm check"
+    )
+    assert audit["next_action"]["requires_user_confirmation"] is True
+    assert audit["next_action"]["will_call_real_llm"] is True
+    assert "- real_llm_blocking_failure: `True`" in markdown
+    assert "## Blocking Failure" in markdown
+    assert "- run_id: `20260623_031821`" in markdown
+    assert "- recommended: `fix_real_llm_configuration`" in markdown
+
+
+def test_general_agent_usability_audit_surfaces_real_llm_health_check_blocker() -> None:
+    scenarios = evals._normalize_scenarios(evals.DEFAULT_SCENARIOS)
+    definition = evals._general_agent_usability_definition_audit(scenarios)
+    cases = []
+    for task_type, record in definition["task_types"].items():
+        for path, path_record in record["paths"].items():
+            scenario_id = path_record["scenario_id"]
+            cases.append(
+                {
+                    "run_id": "offline",
+                    "scenario_id": scenario_id,
+                    "category": "general_agent_usability",
+                    "status": "passed",
+                    "failure_layer": "none",
+                    "run_llm_provider": "test",
+                    "run_llm_model": "deterministic",
+                    "run_dry_run": False,
+                    "run_real_llm_required": False,
+                    "llm_call_count": 0,
+                    "llm_total_tokens": 0,
+                }
+            )
+            if path == "learning_sequence":
+                cases[-1]["learning_evidence"] = _general_learning_sequence_evidence(task_type)
+            if path == "tool_choice":
+                cases.append(
+                    {
+                        "run_id": "20260623_023645",
+                        "scenario_id": scenario_id,
+                        "category": "general_agent_usability",
+                        "status": "selected",
+                        "failure_layer": "none",
+                        "run_llm_provider": "openai",
+                        "run_llm_model": "real-model",
+                        "run_dry_run": True,
+                        "run_real_llm_required": True,
+                        "llm_call_count": 0,
+                        "llm_total_tokens": 0,
+                    }
+                )
+                cases.append(
+                    {
+                        "run_id": "20260623_040000",
+                        "run_dir": "/tmp/eval_runs/20260623_040000",
+                        "scenario_id": scenario_id,
+                        "category": "general_agent_usability",
+                        "status": "selected",
+                        "diagnosis": "selected",
+                        "failure_layer": "none",
+                        "run_llm_provider": "openai",
+                        "run_llm_model": "real-model",
+                        "run_dry_run": False,
+                        "run_real_llm_required": True,
+                        "run_llm_health_check_enabled": True,
+                        "run_llm_health_check_healthy": False,
+                        "llm_call_count": 0,
+                        "llm_total_tokens": 0,
+                    }
+                )
+    _append_learning_governance_evidence_cases(cases)
+
+    audit = evals.build_general_agent_usability_audit(
+        scenarios,
+        {"run_count": 3, "cases": cases},
+    )
+
+    blocker = audit["evidence"]["latest_real_llm_blocking_failure"]
+    assert audit["next_action"]["recommended"] == "fix_real_llm_configuration"
+    assert blocker["run_id"] == "20260623_040000"
+    assert blocker["case_count"] == 5
+    assert blocker["diagnoses"] == ["real_llm_health_check_failed"]
+    assert blocker["failure_layers"] == ["infrastructure"]
 
 
 def test_general_agent_usability_audit_accepts_complete_real_llm_evidence() -> None:
@@ -1023,12 +1599,16 @@ def test_general_agent_usability_audit_accepts_complete_real_llm_evidence() -> N
                         "llm_total_tokens": 100,
                     }
                 )
+            if path == "learning_sequence":
+                case["learning_evidence"] = _general_learning_sequence_evidence(task_type)
             cases.append(case)
+    _append_learning_governance_evidence_cases(cases)
 
     audit = evals.build_general_agent_usability_audit(
         scenarios,
         {"run_count": 1, "cases": cases},
     )
+    requirements = _objective_requirements_by_key(audit)
 
     assert audit["complete"] is True
     assert audit["missing"] == []
@@ -1039,11 +1619,10 @@ def test_general_agent_usability_audit_accepts_complete_real_llm_evidence() -> N
     assert audit["evidence"]["all_required_scenarios_passed"] is True
     assert audit["evidence"]["real_llm_preflight_ready"] is False
     assert audit["evidence"]["real_llm_baseline_ready"] is True
+    assert all(record["passed"] is True for record in requirements.values())
 
 
-def test_general_agent_usability_audit_cli_allows_incomplete_report(
-    tmp_path: Path, capsys
-) -> None:
+def test_general_agent_usability_audit_cli_allows_incomplete_report(tmp_path: Path, capsys) -> None:
     run_root = tmp_path / "runs"
     run_root.mkdir()
     (run_root / "evidence_index.json").write_text(
@@ -1068,6 +1647,7 @@ def test_general_agent_usability_audit_cli_allows_incomplete_report(
     assert "status=incomplete" in captured.out
     assert output_path.exists()
     output = output_path.read_text(encoding="utf-8")
+    assert "learning_governance_evidence" in output
     assert "real_llm_tool_choice_preflight" in output
     assert "real_llm_tool_choice_baseline" in output
     assert "run_offline_general_agent_usability_baseline" in output
@@ -1460,6 +2040,8 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
                 "run_llm_fallback_enabled": True,
                 "run_real_llm_required": True,
                 "run_dry_run": False,
+                "run_llm_health_check_enabled": True,
+                "run_llm_health_check_healthy": True,
                 "llm_call_count": 1,
                 "llm_total_tokens": 42,
                 "task_ids": ["task_1"],
@@ -1663,6 +2245,7 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
         run_llm_providers=["openai"],
         run_llm_models=["gpt-*"],
         llm_usage_signals=["llm_called"],
+        llm_health_signals=["health_check:passed"],
         learning_kinds=["habit_fast_paths"],
         learning_validation_statuses=["passed"],
         skill_validation_statuses=["passed"],
@@ -1707,6 +2290,8 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
             "gpt-*",
             "--evidence-llm-usage",
             "llm_called",
+            "--evidence-llm-health",
+            "health_check:passed",
             "--evidence-category",
             "learning_loop",
             "--evidence-requires",
@@ -1742,6 +2327,7 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
     assert parsed.evidence_run_llm_provider == ["openai"]
     assert parsed.evidence_run_llm_model == ["gpt-*"]
     assert parsed.evidence_llm_usage == ["llm_called"]
+    assert parsed.evidence_llm_health == ["health_check:passed"]
     assert parsed.evidence_category == ["learning_loop"]
     assert parsed.evidence_requires == ["complex"]
     assert parsed.evidence_skip_reason == ["requires --include-network"]
@@ -1772,6 +2358,7 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
     assert query["filters"]["run_llm_provider"] == ["openai"]
     assert query["filters"]["run_llm_model"] == ["gpt-*"]
     assert query["filters"]["llm_usage"] == ["llm_called"]
+    assert query["filters"]["llm_health"] == ["health_check:passed"]
     assert query["filters"]["learning_kind"] == ["habit_fast_paths"]
     assert query["filters"]["learning_validation"] == ["passed"]
     assert query["filters"]["skill_validation"] == ["passed"]
@@ -1852,6 +2439,10 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
         "duration:1-10s": 1,
         "llm_called": 1,
         "tokens:1-999": 1,
+    }
+    assert query["summary"]["by_llm_health"] == {
+        "health_check:enabled": 1,
+        "health_check:passed": 1,
     }
     assert query["summary"]["by_learning_validation"] == {
         "approved": 1,
@@ -1977,6 +2568,12 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
                 "tokens:1-999",
                 "duration:1-10s",
             ],
+            "llm_health_signals": [
+                "health_check:enabled",
+                "health_check:passed",
+            ],
+            "run_llm_health_check_enabled": True,
+            "run_llm_health_check_healthy": True,
             "embedding_providers": ["local_model"],
             "embedding_models": ["bge-small"],
             "vector_match_count": 1,
@@ -2020,6 +2617,7 @@ def test_evidence_index_query_filters_and_summarizes_learning_lineage() -> None:
     assert "- critic_action: `action:accept`" in markdown
     assert "- memory_retrieval: `vector_match`" in markdown
     assert "- llm_usage: `llm_called`" in markdown
+    assert "- llm_health: `health_check:passed`" in markdown
     assert "- category: `learning_*`" in markdown
     assert "- requires: `complex`" in markdown
     assert "- learning_validation: `passed`" in markdown

@@ -50,6 +50,37 @@ GENERAL_AGENT_USABILITY_REUSE_STATUSES = {
     "verified_procedure_reuse",
     "correction_required",
 }
+GENERAL_AGENT_USABILITY_ACCEPTANCE_FACETS = [
+    "success_path",
+    "failure_path",
+    "learning_reuse",
+    "permission_boundary",
+]
+GENERAL_AGENT_USABILITY_FACET_SOURCE_PATH = {
+    "success_path": "tool_choice",
+    "failure_path": "learning_sequence",
+    "learning_reuse": "learning_sequence",
+    "permission_boundary": "permission_boundary",
+}
+GENERAL_AGENT_USABILITY_LEARNING_GOVERNANCE_FACETS = [
+    "learning_feedback",
+    "procedure_reuse_explanation",
+    "reuse_refusal_explanation",
+    "habit_fast_path_explanation",
+    "habit_promoted_skill_lineage",
+    "learning_correction_freeze_restore",
+]
+GENERAL_AGENT_USABILITY_OBJECTIVE_REQUIREMENTS = [
+    "five_task_types",
+    "intake_understands_type_risk_tool_validation",
+    "success_failure_permission_reuse_per_task_type",
+    "task_end_learning_feedback",
+    "procedure_habit_skill_reuse_explanation",
+    "reuse_refusal_when_evidence_insufficient",
+    "learning_correction_freeze_and_restore",
+    "general_agent_usability_eval_set",
+    "real_llm_tool_choice_baseline",
+]
 
 
 def _load_json(path: Path) -> Any:
@@ -222,9 +253,7 @@ def _general_agent_usability_path(scenario: dict[str, Any]) -> str | None:
     return None
 
 
-def _scenario_has_all_values(
-    scenario: dict[str, Any], key: str, required: set[str]
-) -> bool:
+def _scenario_has_all_values(scenario: dict[str, Any], key: str, required: set[str]) -> bool:
     return required.issubset(set(_assertion_values(scenario, key)))
 
 
@@ -236,6 +265,8 @@ def _general_agent_usability_path_issues(
     issues: list[str] = []
     if not _assertion_values(scenario, "required_intake_task_type_any"):
         issues.append("missing required_intake_task_type_any")
+    if not _assertion_values(scenario, "required_intake_risk_level_any"):
+        issues.append("missing required_intake_risk_level_any")
     if not _assertion_values(scenario, "required_intake_tool_any"):
         issues.append("missing required_intake_tool_any")
     if not _assertion_values(scenario, "required_intake_validation_strategy_any"):
@@ -284,9 +315,7 @@ def _general_agent_usability_path_issues(
             issues.append("permission boundary path must require a policy risk flag")
         if "permission" not in _assertion_values(scenario, "required_failure_layer_any"):
             issues.append("permission boundary path must attribute failure to permission")
-        if "permission_denied" not in _assertion_values(
-            scenario, "required_experience_status_any"
-        ):
+        if "permission_denied" not in _assertion_values(scenario, "required_experience_status_any"):
             issues.append("permission boundary path must record permission_denied experience")
         if _assertion_bool(scenario, "required_intake_confirmation_required") is not True:
             issues.append("permission boundary path must require confirmation")
@@ -336,6 +365,17 @@ def _general_agent_usability_definition_audit(
 
     for task_type, record in task_types.items():
         path_records = record["paths"]
+        capabilities = {}
+        for facet in GENERAL_AGENT_USABILITY_ACCEPTANCE_FACETS:
+            source_path = GENERAL_AGENT_USABILITY_FACET_SOURCE_PATH[facet]
+            source_record = path_records[source_path]
+            capabilities[facet] = {
+                "ready": bool(source_record["ready"]),
+                "scenario_id": source_record.get("scenario_id"),
+                "source_path": source_path,
+                "issues": list(source_record.get("issues") or []),
+            }
+        record["capabilities"] = capabilities
         record["ready"] = all(path_records[path]["ready"] for path in paths)
         record["scenario_ids"] = [
             str(path_records[path]["scenario_id"])
@@ -346,6 +386,7 @@ def _general_agent_usability_definition_audit(
     return {
         "required_task_types": GENERAL_AGENT_USABILITY_TASK_TYPES,
         "required_paths": paths,
+        "required_facets": GENERAL_AGENT_USABILITY_ACCEPTANCE_FACETS,
         "scenario_definition_ready": definition_ready,
         "task_type_count": len(task_types),
         "ready_task_type_count": sum(1 for item in task_types.values() if item["ready"]),
@@ -376,6 +417,325 @@ def _case_proves_real_llm_preflight(case: dict[str, Any]) -> bool:
     if case.get("status") != "selected":
         return False
     return _case_int_value(case, "llm_call_count") == 0
+
+
+def _case_is_real_llm_tool_choice_attempt(case: dict[str, Any]) -> bool:
+    provider = str(case.get("run_llm_provider") or "").strip().lower()
+    scenario_id = str(case.get("scenario_id") or "")
+    if provider in NON_REAL_LLM_PROVIDERS:
+        return False
+    if case.get("run_dry_run") is True:
+        return False
+    if case.get("run_real_llm_required") is not True:
+        return False
+    return fnmatch.fnmatch(scenario_id, GENERAL_AGENT_USABILITY_TOOL_CHOICE_GLOB)
+
+
+def _case_is_real_llm_blocking_failure(case: dict[str, Any]) -> bool:
+    if not _case_is_real_llm_tool_choice_attempt(case):
+        return False
+    if _case_has_real_llm_health_check_failure(case):
+        return True
+    if case.get("status") != "failed":
+        return False
+    diagnosis = str(case.get("diagnosis") or "")
+    failure_layer = str(case.get("failure_layer") or "")
+    return diagnosis == "llm_call_or_configuration" or failure_layer == "infrastructure"
+
+
+def _case_has_real_llm_health_check_failure(case: dict[str, Any]) -> bool:
+    return (
+        case.get("run_llm_health_check_enabled") is True
+        and case.get("run_llm_health_check_healthy") is False
+    )
+
+
+def _learning_records_for_case(case: dict[str, Any], section: str) -> list[dict[str, Any]]:
+    learning = case.get("learning_evidence")
+    if not isinstance(learning, dict):
+        return []
+    records = learning.get(section)
+    if not isinstance(records, list):
+        return []
+    return [record for record in records if isinstance(record, dict)]
+
+
+def _case_has_learning_feedback_evidence(case: dict[str, Any]) -> bool:
+    for record in _learning_records_for_case(case, "learning_feedbacks"):
+        if record.get("path") and (
+            record.get("summary_line_count")
+            or record.get("reuse_status")
+            or record.get("learnable") is not None
+        ):
+            return True
+    return False
+
+
+def _case_has_procedure_reuse_explanation(case: dict[str, Any]) -> bool:
+    for record in _learning_records_for_case(case, "procedure_matches"):
+        if record.get("matched") is not True:
+            continue
+        if not record.get("procedure_id"):
+            continue
+        if not record.get("reason"):
+            continue
+        if not record.get("suggestion_mode"):
+            continue
+        return True
+    return False
+
+
+def _case_has_reuse_refusal_explanation(case: dict[str, Any]) -> bool:
+    for record in _learning_records_for_case(case, "procedure_matches"):
+        if record.get("matched") is not False:
+            continue
+        rejected = record.get("rejected_candidates")
+        rejected_count = record.get("rejected_candidate_count")
+        has_rejected_candidate = isinstance(rejected, list) and any(
+            isinstance(item, dict) and item.get("reason") for item in rejected
+        )
+        if not has_rejected_candidate and not int(rejected_count or 0) > 0:
+            continue
+        if not record.get("reason"):
+            continue
+        if not record.get("suggestion_mode"):
+            continue
+        return True
+    return False
+
+
+def _case_has_habit_fast_path_explanation(case: dict[str, Any]) -> bool:
+    for record in _learning_records_for_case(case, "procedure_matches"):
+        if record.get("matched") is True and str(record.get("status") or "") == "habit":
+            if record.get("reason") and record.get("suggestion_mode"):
+                return True
+    for record in _learning_records_for_case(case, "habit_fast_paths"):
+        if str(record.get("decision") or "") == "habit_fast_path_candidate":
+            if record.get("habit_id") and record.get("validator_evidence_refs"):
+                return True
+    return False
+
+
+def _case_has_habit_promoted_skill_lineage(case: dict[str, Any]) -> bool:
+    generated_skills = set(_string_values(case.get("used_skills")))
+    for record in _learning_records_for_case(case, "skill_lineages"):
+        skill_name = str(record.get("skill_name") or "")
+        if not fnmatch.fnmatchcase(skill_name, "generated.habit.*"):
+            continue
+        generated_skills.add(skill_name)
+        if not record.get("habit_id") or not record.get("procedure_id"):
+            continue
+        if not record.get("generation_type") and not _string_values(record.get("source_targets")):
+            continue
+        return True
+    return any(fnmatch.fnmatchcase(skill, "generated.habit.*") for skill in generated_skills)
+
+
+def _case_has_learning_correction_freeze_restore(case: dict[str, Any]) -> bool:
+    frozen_procedure_ids = {
+        str(record.get("procedure_id"))
+        for record in _learning_records_for_case(case, "learning_corrections")
+        if record.get("trigger") == "validator_failure"
+        and record.get("frozen") is True
+        and record.get("procedure_id")
+    }
+    if not frozen_procedure_ids:
+        return False
+    for record in _learning_records_for_case(case, "procedure_memory_records"):
+        procedure_id = str(record.get("procedure_id") or "")
+        if procedure_id not in frozen_procedure_ids:
+            continue
+        audit_events = _string_values(record.get("audit_events"))
+        review_decisions = _string_values(record.get("review_decisions"))
+        if "validator_failed" not in audit_events:
+            continue
+        restored = (
+            "promoted_to_verified" in audit_events
+            or record.get("restored_status")
+            or str(record.get("status") or "") == "verified"
+        )
+        approved = (
+            str(record.get("review_status") or "") == "approved"
+            or str(record.get("latest_review_decision") or "") == "approved"
+            or "approved" in review_decisions
+        )
+        if restored and approved:
+            return True
+    return False
+
+
+def _case_blocking_diagnosis(case: dict[str, Any]) -> str:
+    if _case_has_real_llm_health_check_failure(case):
+        return "real_llm_health_check_failed"
+    return str(case.get("diagnosis") or "")
+
+
+def _case_blocking_failure_layer(case: dict[str, Any]) -> str:
+    if _case_has_real_llm_health_check_failure(case):
+        return "infrastructure"
+    return str(case.get("failure_layer") or "")
+
+
+def _latest_real_llm_blocking_failure(cases: list[dict[str, Any]]) -> dict[str, Any] | None:
+    candidates = [case for case in cases if _case_is_real_llm_blocking_failure(case)]
+    if not candidates:
+        return None
+    latest = max(
+        candidates,
+        key=lambda case: (
+            str(case.get("run_id") or ""),
+            str(case.get("scenario_id") or ""),
+        ),
+    )
+    latest_run_id = str(latest.get("run_id") or "")
+    run_cases = [case for case in candidates if str(case.get("run_id") or "") == latest_run_id]
+    scenario_ids = sorted({str(case.get("scenario_id") or "") for case in run_cases})
+    diagnoses = sorted({_case_blocking_diagnosis(case) for case in run_cases})
+    failure_layers = sorted({_case_blocking_failure_layer(case) for case in run_cases})
+    issues = sorted(
+        {
+            str(issue)
+            for case in run_cases
+            for issue in case.get("issues", [])
+            if isinstance(issue, str)
+        }
+    )
+    return {
+        "present": True,
+        "run_id": latest_run_id,
+        "run_dir": latest.get("run_dir"),
+        "case_count": len(run_cases),
+        "scenario_ids": scenario_ids,
+        "diagnoses": diagnoses,
+        "failure_layers": failure_layers,
+        "run_llm_provider": latest.get("run_llm_provider"),
+        "run_llm_model": latest.get("run_llm_model"),
+        "issues": issues[:5],
+    }
+
+
+def _facet_evidence_record(
+    *,
+    facet: str,
+    cases: list[dict[str, Any]],
+) -> dict[str, Any]:
+    scenario_ids = sorted({str(case.get("scenario_id") or "") for case in cases})
+    run_ids = sorted({str(case.get("run_id") or "") for case in cases})
+    return {
+        "facet": facet,
+        "passed": bool(cases),
+        "case_count": len(cases),
+        "scenario_ids": scenario_ids,
+        "run_ids": run_ids,
+    }
+
+
+def _general_agent_usability_learning_governance_audit(
+    definition: dict[str, Any],
+    cases_by_scenario: dict[str, list[dict[str, Any]]],
+    all_cases: list[dict[str, Any]],
+) -> dict[str, Any]:
+    passed_cases = [case for case in all_cases if case.get("status") == "passed"]
+    task_type_records: dict[str, dict[str, Any]] = {}
+    feedback_cases: list[dict[str, Any]] = []
+    reuse_explanation_cases: list[dict[str, Any]] = []
+    correction_freeze_cases: list[dict[str, Any]] = []
+
+    for task_type, definition_record in definition.get("task_types", {}).items():
+        learning_scenario_id = (
+            definition_record.get("paths", {}).get("learning_sequence", {}).get("scenario_id")
+        )
+        scenario_cases = (
+            cases_by_scenario.get(str(learning_scenario_id), []) if learning_scenario_id else []
+        )
+        passed_scenario_cases = [case for case in scenario_cases if case.get("status") == "passed"]
+        task_feedback_cases = [
+            case for case in passed_scenario_cases if _case_has_learning_feedback_evidence(case)
+        ]
+        task_reuse_cases = [
+            case for case in passed_scenario_cases if _case_has_procedure_reuse_explanation(case)
+        ]
+        task_correction_cases = [
+            case
+            for case in passed_scenario_cases
+            if any(
+                record.get("trigger") == "validator_failure" and record.get("frozen") is True
+                for record in _learning_records_for_case(case, "learning_corrections")
+            )
+        ]
+        feedback_cases.extend(task_feedback_cases[:1])
+        reuse_explanation_cases.extend(task_reuse_cases[:1])
+        correction_freeze_cases.extend(task_correction_cases[:1])
+        task_type_records[task_type] = {
+            "learning_sequence_scenario_id": learning_scenario_id,
+            "learning_feedback": bool(task_feedback_cases),
+            "procedure_reuse_explanation": bool(task_reuse_cases),
+            "learning_correction_freeze": bool(task_correction_cases),
+        }
+
+    refusal_cases = [case for case in passed_cases if _case_has_reuse_refusal_explanation(case)]
+    habit_cases = [case for case in passed_cases if _case_has_habit_fast_path_explanation(case)]
+    skill_lineage_cases = [
+        case for case in passed_cases if _case_has_habit_promoted_skill_lineage(case)
+    ]
+    correction_restore_cases = [
+        case for case in passed_cases if _case_has_learning_correction_freeze_restore(case)
+    ]
+    facets = {
+        "learning_feedback": _facet_evidence_record(
+            facet="learning_feedback",
+            cases=feedback_cases,
+        ),
+        "procedure_reuse_explanation": _facet_evidence_record(
+            facet="procedure_reuse_explanation",
+            cases=reuse_explanation_cases,
+        ),
+        "reuse_refusal_explanation": _facet_evidence_record(
+            facet="reuse_refusal_explanation",
+            cases=refusal_cases,
+        ),
+        "habit_fast_path_explanation": _facet_evidence_record(
+            facet="habit_fast_path_explanation",
+            cases=habit_cases,
+        ),
+        "habit_promoted_skill_lineage": _facet_evidence_record(
+            facet="habit_promoted_skill_lineage",
+            cases=skill_lineage_cases,
+        ),
+        "learning_correction_freeze_restore": _facet_evidence_record(
+            facet="learning_correction_freeze_restore",
+            cases=correction_restore_cases,
+        ),
+    }
+    all_task_feedback_ready = all(
+        record["learning_feedback"] for record in task_type_records.values()
+    )
+    all_task_reuse_explained = all(
+        record["procedure_reuse_explanation"] for record in task_type_records.values()
+    )
+    all_task_correction_freeze_ready = all(
+        record["learning_correction_freeze"] for record in task_type_records.values()
+    )
+    facets["learning_feedback"]["passed"] = (
+        all_task_feedback_ready and facets["learning_feedback"]["case_count"] > 0
+    )
+    facets["procedure_reuse_explanation"]["passed"] = (
+        all_task_reuse_explained and facets["procedure_reuse_explanation"]["case_count"] > 0
+    )
+    facets["learning_correction_freeze_restore"]["passed"] = (
+        all_task_correction_freeze_ready
+        and facets["learning_correction_freeze_restore"]["case_count"] > 0
+    )
+    ready = all(
+        bool(facets[facet]["passed"])
+        for facet in GENERAL_AGENT_USABILITY_LEARNING_GOVERNANCE_FACETS
+    )
+    return {
+        "required_facets": GENERAL_AGENT_USABILITY_LEARNING_GOVERNANCE_FACETS,
+        "ready": ready,
+        "task_types": task_type_records,
+        "facets": facets,
+    }
 
 
 def _general_agent_usability_evidence_audit(
@@ -415,9 +775,23 @@ def _general_agent_usability_evidence_audit(
                 "real_llm_passed": bool(real_llm_cases),
                 "real_llm_passed_count": len(real_llm_cases),
             }
+        capability_records = {}
+        for facet, source_path in GENERAL_AGENT_USABILITY_FACET_SOURCE_PATH.items():
+            source_record = path_records.get(source_path, {})
+            capability_records[facet] = {
+                "scenario_id": source_record.get("scenario_id"),
+                "source_path": source_path,
+                "passed": bool(source_record.get("passed")),
+                "passed_count": int(source_record.get("passed_count") or 0),
+            }
         task_type_records[task_type] = {
             "paths": path_records,
+            "capabilities": capability_records,
             "all_paths_passed": all(item["passed"] for item in path_records.values()),
+            "success_path_passed": capability_records["success_path"]["passed"],
+            "failure_path_passed": capability_records["failure_path"]["passed"],
+            "learning_reuse_passed": capability_records["learning_reuse"]["passed"],
+            "permission_boundary_passed": capability_records["permission_boundary"]["passed"],
             "tool_choice_real_llm_passed": path_records.get("tool_choice", {}).get(
                 "real_llm_passed",
                 False,
@@ -438,6 +812,12 @@ def _general_agent_usability_evidence_audit(
     real_llm_preflight_ready = evidence_available and all(
         record["tool_choice_real_llm_preflight"] for record in task_type_records.values()
     )
+    blocking_failure = _latest_real_llm_blocking_failure(cases)
+    learning_governance = _general_agent_usability_learning_governance_audit(
+        definition,
+        cases_by_scenario,
+        cases,
+    )
     return {
         "evidence_available": evidence_available,
         "source_run_count": evidence_index.get("run_count", 0)
@@ -447,8 +827,172 @@ def _general_agent_usability_evidence_audit(
         "all_required_scenarios_passed": offline_or_any_evidence_ready,
         "real_llm_preflight_ready": real_llm_preflight_ready,
         "real_llm_baseline_ready": real_llm_baseline_ready,
+        "learning_governance_ready": learning_governance["ready"],
+        "learning_governance": learning_governance,
+        "latest_real_llm_blocking_failure": blocking_failure,
         "task_types": task_type_records,
     }
+
+
+def _objective_requirement_record(
+    *,
+    requirement: str,
+    passed: bool,
+    evidence: str,
+    gap: str,
+) -> dict[str, Any]:
+    return {
+        "requirement": requirement,
+        "passed": bool(passed),
+        "evidence": evidence,
+        "gap": gap,
+    }
+
+
+def _learning_facet_passed(evidence: dict[str, Any], facet: str) -> bool:
+    learning_governance = evidence.get("learning_governance")
+    if not isinstance(learning_governance, dict):
+        return False
+    facets = learning_governance.get("facets")
+    if not isinstance(facets, dict):
+        return False
+    record = facets.get(facet)
+    return isinstance(record, dict) and bool(record.get("passed"))
+
+
+def _learning_facet_case_count(evidence: dict[str, Any], facet: str) -> int:
+    learning_governance = evidence.get("learning_governance")
+    if not isinstance(learning_governance, dict):
+        return 0
+    facets = learning_governance.get("facets")
+    if not isinstance(facets, dict):
+        return 0
+    record = facets.get(facet)
+    if not isinstance(record, dict):
+        return 0
+    return int(record.get("case_count") or 0)
+
+
+def _general_agent_usability_objective_requirements(
+    definition: dict[str, Any],
+    evidence: dict[str, Any],
+) -> list[dict[str, Any]]:
+    task_type_count = int(definition.get("task_type_count") or 0)
+    ready_task_type_count = int(definition.get("ready_task_type_count") or 0)
+    required_task_type_count = len(GENERAL_AGENT_USABILITY_TASK_TYPES)
+    definition_ready = bool(definition.get("scenario_definition_ready"))
+    all_required_scenarios_passed = bool(evidence.get("all_required_scenarios_passed"))
+    learning_governance_ready = bool(evidence.get("learning_governance_ready"))
+    real_llm_baseline_ready = bool(evidence.get("real_llm_baseline_ready"))
+    evidence_task_types = (
+        evidence.get("task_types") if isinstance(evidence.get("task_types"), dict) else {}
+    )
+    per_task_type_facets_ready = (
+        all(
+            bool(record.get("success_path_passed"))
+            and bool(record.get("failure_path_passed"))
+            and bool(record.get("learning_reuse_passed"))
+            and bool(record.get("permission_boundary_passed"))
+            for record in evidence_task_types.values()
+        )
+        and len(evidence_task_types) == required_task_type_count
+    )
+    procedure_reuse_ready = _learning_facet_passed(
+        evidence,
+        "procedure_reuse_explanation",
+    )
+    habit_reuse_ready = _learning_facet_passed(evidence, "habit_fast_path_explanation")
+    skill_reuse_ready = _learning_facet_passed(evidence, "habit_promoted_skill_lineage")
+    return [
+        _objective_requirement_record(
+            requirement="five_task_types",
+            passed=(
+                definition_ready
+                and task_type_count == required_task_type_count
+                and ready_task_type_count == required_task_type_count
+            ),
+            evidence=(
+                f"{ready_task_type_count}/{required_task_type_count} task types "
+                "defined with all required paths"
+            ),
+            gap="fix general_agent_usability scenario definitions",
+        ),
+        _objective_requirement_record(
+            requirement="intake_understands_type_risk_tool_validation",
+            passed=definition_ready,
+            evidence=(
+                "each required scenario asserts task_type, risk_level, tool, "
+                "validation_strategy, and confirmation policy"
+            ),
+            gap="add missing intake assertions to scenario definitions",
+        ),
+        _objective_requirement_record(
+            requirement="success_failure_permission_reuse_per_task_type",
+            passed=all_required_scenarios_passed and per_task_type_facets_ready,
+            evidence=(
+                "success_path, failure_path, learning_reuse, and permission_boundary "
+                f"passed for {len(evidence_task_types)}/{required_task_type_count} task types"
+            ),
+            gap="run offline general_agent_usability baseline until all facets pass",
+        ),
+        _objective_requirement_record(
+            requirement="task_end_learning_feedback",
+            passed=_learning_facet_passed(evidence, "learning_feedback"),
+            evidence=(
+                "learning_feedback cases="
+                f"{_learning_facet_case_count(evidence, 'learning_feedback')}"
+            ),
+            gap="run learning feedback baseline and rebuild evidence index",
+        ),
+        _objective_requirement_record(
+            requirement="procedure_habit_skill_reuse_explanation",
+            passed=procedure_reuse_ready and habit_reuse_ready and skill_reuse_ready,
+            evidence=(
+                "procedure_reuse="
+                f"{_learning_facet_case_count(evidence, 'procedure_reuse_explanation')}, "
+                "habit_fast_path="
+                f"{_learning_facet_case_count(evidence, 'habit_fast_path_explanation')}, "
+                "habit_promoted_skill="
+                f"{_learning_facet_case_count(evidence, 'habit_promoted_skill_lineage')}"
+            ),
+            gap="run learning governance baseline covering procedure, habit, and skill reuse",
+        ),
+        _objective_requirement_record(
+            requirement="reuse_refusal_when_evidence_insufficient",
+            passed=_learning_facet_passed(evidence, "reuse_refusal_explanation"),
+            evidence=(
+                "reuse_refusal cases="
+                f"{_learning_facet_case_count(evidence, 'reuse_refusal_explanation')}"
+            ),
+            gap="add or run reuse refusal evidence with rejected candidate reasons",
+        ),
+        _objective_requirement_record(
+            requirement="learning_correction_freeze_and_restore",
+            passed=_learning_facet_passed(evidence, "learning_correction_freeze_restore"),
+            evidence=(
+                "correction_freeze_restore cases="
+                f"{_learning_facet_case_count(evidence, 'learning_correction_freeze_restore')}"
+            ),
+            gap="run learning correction recovery baseline",
+        ),
+        _objective_requirement_record(
+            requirement="general_agent_usability_eval_set",
+            passed=definition_ready and all_required_scenarios_passed and learning_governance_ready,
+            evidence=(
+                "scenario_definition_ready="
+                f"{definition_ready}, all_required_scenarios_passed="
+                f"{all_required_scenarios_passed}, learning_governance_ready="
+                f"{learning_governance_ready}"
+            ),
+            gap="repair scenario definitions or rerun offline and learning governance baselines",
+        ),
+        _objective_requirement_record(
+            requirement="real_llm_tool_choice_baseline",
+            passed=real_llm_baseline_ready,
+            evidence=f"real_llm_baseline_ready={real_llm_baseline_ready}",
+            gap="run real provider tool-choice baseline with a healthy LLM configuration",
+        ),
+    ]
 
 
 def _general_agent_usability_run_command(
@@ -477,6 +1021,8 @@ def _general_agent_usability_run_command(
     )
     if not test_provider:
         parts.append("--require-real-llm")
+        if not dry_run:
+            parts.append("--real-llm-health-check")
     if dry_run:
         parts.append("--dry-run")
     return " ".join(shlex.quote(part) for part in parts)
@@ -508,6 +1054,7 @@ def _general_agent_usability_next_action(
     offline_command = _general_agent_usability_offline_command()
     preflight_command = _general_agent_usability_run_command(dry_run=True)
     baseline_command = _general_agent_usability_run_command(dry_run=False)
+    blocking_failure = evidence.get("latest_real_llm_blocking_failure")
     if evidence.get("real_llm_baseline_ready"):
         recommended = "none"
         command = ""
@@ -517,18 +1064,32 @@ def _general_agent_usability_next_action(
     elif not evidence.get("all_required_scenarios_passed"):
         recommended = "run_offline_general_agent_usability_baseline"
         command = offline_command
+    elif not evidence.get("learning_governance_ready"):
+        recommended = "run_learning_governance_baseline"
+        command = (
+            "poetry run python scripts/run_real_world_evals.py "
+            "--scenario learning_loop_feedback_sequence "
+            "--scenario learning_loop_correction_recovery "
+            "--scenario learning_loop_jsonl_habit_promoted_skill_lineage"
+        )
     elif not evidence.get("real_llm_preflight_ready"):
         recommended = "run_real_llm_tool_choice_preflight"
         command = preflight_command
+    elif isinstance(blocking_failure, dict) and blocking_failure.get("present"):
+        recommended = "fix_real_llm_configuration"
+        command = "poetry run omniagent --workspace ./workspace llm check"
     else:
         recommended = "run_real_llm_tool_choice_baseline"
         command = baseline_command
     return {
         "recommended": recommended,
         "command": command,
-        "requires_user_confirmation": recommended == "run_real_llm_tool_choice_baseline",
-        "will_call_real_llm": recommended == "run_real_llm_tool_choice_baseline",
+        "requires_user_confirmation": recommended
+        in {"run_real_llm_tool_choice_baseline", "fix_real_llm_configuration"},
+        "will_call_real_llm": recommended
+        in {"run_real_llm_tool_choice_baseline", "fix_real_llm_configuration"},
         "missing": list(missing),
+        "blocking_failure": blocking_failure,
         "offline_baseline_command": offline_command,
         "real_llm_preflight_command": preflight_command,
         "real_llm_baseline_command": baseline_command,
@@ -541,11 +1102,17 @@ def build_general_agent_usability_audit(
 ) -> dict[str, Any]:
     definition = _general_agent_usability_definition_audit(scenarios)
     evidence = _general_agent_usability_evidence_audit(definition, evidence_index)
+    objective_requirements = _general_agent_usability_objective_requirements(
+        definition,
+        evidence,
+    )
     missing: list[str] = []
     if not definition["scenario_definition_ready"]:
         missing.append("scenario_definition")
     if not evidence["all_required_scenarios_passed"]:
         missing.append("passed_evidence_for_all_required_scenarios")
+    if not evidence["learning_governance_ready"]:
+        missing.append("learning_governance_evidence")
     if not evidence["real_llm_baseline_ready"]:
         if not evidence["real_llm_preflight_ready"]:
             missing.append("real_llm_tool_choice_preflight")
@@ -563,16 +1130,34 @@ def build_general_agent_usability_audit(
         "status": "complete" if complete else "incomplete",
         "missing": missing,
         "next_action": next_action,
+        "objective_requirements": objective_requirements,
         "definition": definition,
         "evidence": evidence,
     }
 
 
+def _markdown_table_text(value: Any) -> str:
+    return str(value or "-").replace("|", "/").replace("\n", " ")
+
+
 def render_general_agent_usability_audit_markdown(payload: dict[str, Any]) -> str:
     definition = payload.get("definition") if isinstance(payload.get("definition"), dict) else {}
     evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
-    next_action = (
-        payload.get("next_action") if isinstance(payload.get("next_action"), dict) else {}
+    next_action = payload.get("next_action") if isinstance(payload.get("next_action"), dict) else {}
+    objective_requirements = (
+        payload.get("objective_requirements")
+        if isinstance(payload.get("objective_requirements"), list)
+        else []
+    )
+    blocking_failure = (
+        evidence.get("latest_real_llm_blocking_failure")
+        if isinstance(evidence.get("latest_real_llm_blocking_failure"), dict)
+        else {}
+    )
+    learning_governance = (
+        evidence.get("learning_governance")
+        if isinstance(evidence.get("learning_governance"), dict)
+        else {}
     )
     lines = [
         "# General Agent Usability Audit",
@@ -581,39 +1166,107 @@ def render_general_agent_usability_audit_markdown(payload: dict[str, Any]) -> st
         f"- complete: `{payload.get('complete')}`",
         f"- missing: {_markdown_value_list(_string_values(payload.get('missing')))}",
         f"- scenario_definition_ready: `{definition.get('scenario_definition_ready')}`",
+        f"- required_facets: {_markdown_value_list(_string_values(definition.get('required_facets')))}",
         f"- ready_task_types: {definition.get('ready_task_type_count', 0)}/{definition.get('task_type_count', 0)}",
         f"- evidence_available: `{evidence.get('evidence_available')}`",
         f"- all_required_scenarios_passed: `{evidence.get('all_required_scenarios_passed')}`",
+        f"- learning_governance_ready: `{evidence.get('learning_governance_ready')}`",
         f"- real_llm_preflight_ready: `{evidence.get('real_llm_preflight_ready')}`",
         f"- real_llm_baseline_ready: `{evidence.get('real_llm_baseline_ready')}`",
+        f"- real_llm_blocking_failure: `{bool(blocking_failure.get('present'))}`",
         f"- source_run_count: {evidence.get('source_run_count', 0)}",
         f"- total_index_cases: {evidence.get('total_index_cases', 0)}",
         "",
-        "## Next Action",
+        "## Objective Requirements",
         "",
-        f"- recommended: `{next_action.get('recommended') or 'none'}`",
-        f"- command: `{next_action.get('command') or '-'}`",
-        f"- requires_user_confirmation: `{next_action.get('requires_user_confirmation')}`",
-        f"- will_call_real_llm: `{next_action.get('will_call_real_llm')}`",
-        "",
-        "## Task Types",
-        "",
-        "| Task Type | Definition | Learning Evidence | Tool Choice Evidence | Real LLM Preflight | Real LLM Tool Choice | Permission Evidence |",
-        "|---|---|---|---|---|---|---|",
+        "| Requirement | Passed | Evidence | Gap |",
+        "|---|---|---|---|",
     ]
+    for record in objective_requirements:
+        if not isinstance(record, dict):
+            continue
+        lines.append(
+            f"| `{_markdown_table_text(record.get('requirement'))}` | "
+            f"`{bool(record.get('passed'))}` | "
+            f"{_markdown_table_text(record.get('evidence'))} | "
+            f"{_markdown_table_text(record.get('gap'))} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Next Action",
+            "",
+            f"- recommended: `{next_action.get('recommended') or 'none'}`",
+            f"- command: `{next_action.get('command') or '-'}`",
+            f"- requires_user_confirmation: `{next_action.get('requires_user_confirmation')}`",
+            f"- will_call_real_llm: `{next_action.get('will_call_real_llm')}`",
+            "",
+        ]
+    )
+    if blocking_failure.get("present"):
+        lines.extend(
+            [
+                "## Blocking Failure",
+                "",
+                f"- run_id: `{blocking_failure.get('run_id') or '-'}`",
+                f"- case_count: `{blocking_failure.get('case_count') or 0}`",
+                f"- provider: `{blocking_failure.get('run_llm_provider') or '-'}`",
+                f"- model: `{blocking_failure.get('run_llm_model') or '-'}`",
+                "- diagnoses: "
+                f"{_markdown_value_list(_string_values(blocking_failure.get('diagnoses')))}",
+                "- failure_layers: "
+                f"{_markdown_value_list(_string_values(blocking_failure.get('failure_layers')))}",
+                "- scenarios: "
+                f"{_markdown_value_list(_string_values(blocking_failure.get('scenario_ids')))}",
+                "",
+            ]
+        )
+    learning_facets = (
+        learning_governance.get("facets")
+        if isinstance(learning_governance.get("facets"), dict)
+        else {}
+    )
+    lines.extend(
+        [
+            "## Learning Governance",
+            "",
+            "| Facet | Passed | Case Count | Scenarios |",
+            "|---|---|---|---|",
+        ]
+    )
+    for facet in GENERAL_AGENT_USABILITY_LEARNING_GOVERNANCE_FACETS:
+        record = learning_facets.get(facet, {}) if isinstance(learning_facets, dict) else {}
+        lines.append(
+            f"| `{facet}` | `{bool(record.get('passed'))}` | "
+            f"`{int(record.get('case_count') or 0)}` | "
+            f"{_markdown_value_list(_string_values(record.get('scenario_ids')))} |"
+        )
+    lines.append("")
+    lines.extend(
+        [
+            "## Task Types",
+            "",
+            "| Task Type | Definition | Success Evidence | Failure Evidence | Learning Reuse Evidence | Tool Choice Evidence | Real LLM Preflight | Real LLM Tool Choice | Permission Evidence |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
     evidence_task_types = (
         evidence.get("task_types") if isinstance(evidence.get("task_types"), dict) else {}
     )
     for task_type in GENERAL_AGENT_USABILITY_TASK_TYPES:
         definition_record = (definition.get("task_types") or {}).get(task_type, {})
         evidence_record = evidence_task_types.get(task_type, {})
-        paths = evidence_record.get("paths") if isinstance(evidence_record.get("paths"), dict) else {}
-        learning = paths.get("learning_sequence", {})
+        paths = (
+            evidence_record.get("paths") if isinstance(evidence_record.get("paths"), dict) else {}
+        )
         tool_choice = paths.get("tool_choice", {})
         permission = paths.get("permission_boundary", {})
         lines.append(
             f"| `{task_type}` | `{bool(definition_record.get('ready'))}` | "
-            f"`{bool(learning.get('passed'))}` | `{bool(tool_choice.get('passed'))}` | "
+            f"`{bool(evidence_record.get('success_path_passed'))}` | "
+            f"`{bool(evidence_record.get('failure_path_passed'))}` | "
+            f"`{bool(evidence_record.get('learning_reuse_passed'))}` | "
+            f"`{bool(tool_choice.get('passed'))}` | "
             f"`{bool(tool_choice.get('real_llm_preflight'))}` | "
             f"`{bool(tool_choice.get('real_llm_passed'))}` | "
             f"`{bool(permission.get('passed'))}` |"
@@ -656,14 +1309,43 @@ def _real_llm_guard_error() -> str | None:
     )
 
 
+def _real_llm_health_check() -> dict[str, Any]:
+    src_path = str(REPO_ROOT / "src")
+    if src_path not in sys.path:
+        sys.path.insert(0, src_path)
+
+    from omniagent.config import AppConfig
+    from omniagent.errors import OmniAgentError
+    from omniagent.llm.factory import build_llm_adapter
+
+    try:
+        config = AppConfig.from_env(REPO_ROOT)
+        payload = build_llm_adapter(config.llm).check_health()
+        return {
+            "healthy": bool(payload.get("healthy")),
+            "payload": payload,
+        }
+    except OmniAgentError as exc:
+        return {
+            "healthy": False,
+            "error": exc.to_dict(),
+        }
+    except Exception as exc:  # pragma: no cover - defensive provider setup guard.
+        return {
+            "healthy": False,
+            "error": {
+                "code": exc.__class__.__name__,
+                "message": str(exc),
+            },
+        }
+
+
 def _run_metadata(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "selection": {
             "scenario": _split_filter_values(getattr(args, "scenario", None)),
             "scenario_glob": _split_filter_values(getattr(args, "scenario_glob", None)),
-            "scenario_category": _split_filter_values(
-                getattr(args, "scenario_category", None)
-            ),
+            "scenario_category": _split_filter_values(getattr(args, "scenario_category", None)),
             "expect_selected_count": getattr(args, "expect_selected_count", None),
             "include_network": bool(getattr(args, "include_network", False)),
             "include_l4": bool(getattr(args, "include_l4", False)),
@@ -673,6 +1355,7 @@ def _run_metadata(args: argparse.Namespace) -> dict[str, Any]:
         "execution": {
             "dry_run": bool(getattr(args, "dry_run", False)),
             "require_real_llm": bool(getattr(args, "require_real_llm", False)),
+            "real_llm_health_check": bool(getattr(args, "real_llm_health_check", False)),
         },
         "llm": _current_llm_config_summary(),
     }
@@ -1582,6 +2265,7 @@ def _failure_layer(diagnosis: str, passed: bool = False) -> str:
         "passed": "none",
         "runtime_timeout": "infrastructure",
         "cli_or_infrastructure": "infrastructure",
+        "llm_call_or_configuration": "infrastructure",
         "router_or_interaction_dispatch": "routing",
         "planner_or_skill_selection": "planning",
         "permission_guardrail": "permission",
@@ -1618,7 +2302,7 @@ def _fix_entrypoint(diagnosis: str, failure_layer: str) -> str:
     if failure_layer == "assertion":
         return "先判断断言是否过窄或场景描述不完整，再决定是否修代码、prompt 或调整评测定义。"
     if failure_layer == "infrastructure":
-        return "先检查 provider 配置、网络、CLI JSON 输出、超时和本地环境变量。"
+        return "先检查 LLM provider 配置、API key、网络、CLI JSON 输出、超时和本地环境变量。"
     if diagnosis == "passed":
         return "无需修复；保留本报告作为回归证据。"
     return "从 summary.md、result.json、turn 输出和 workspace 产物开始定位。"
@@ -2675,9 +3359,7 @@ def _evaluate_assertions(
         item for item in evidence.get("experience_records", []) if isinstance(item, dict)
     ]
     experience_statuses = [
-        str(item.get("status"))
-        for item in experience_records
-        if item.get("status") is not None
+        str(item.get("status")) for item in experience_records if item.get("status") is not None
     ]
     _assert_required_any(
         label="experience status",
@@ -3015,6 +3697,8 @@ def _diagnose(issues: list[str], executions: list[dict[str, Any]], evidence: dic
         return "runtime_timeout"
     if any(item.get("json") is None for item in executions):
         return "cli_or_infrastructure"
+    if _has_llm_error(executions, evidence):
+        return "llm_call_or_configuration"
     if issues and any(
         turn.get("route_input_type")
         in {"chitchat", "knowledge_query", "status_query", "system_request"}
@@ -3068,6 +3752,24 @@ def _diagnose(issues: list[str], executions: list[dict[str, Any]], evidence: dic
     if issues:
         return "assertion_failure"
     return "passed"
+
+
+def _has_llm_error(executions: list[dict[str, Any]], evidence: dict[str, Any]) -> bool:
+    for execution in executions:
+        payload = execution.get("json")
+        if not isinstance(payload, dict):
+            continue
+        task = payload.get("task")
+        if isinstance(task, dict) and task.get("error_code") == "llm_error":
+            return True
+        result = payload.get("result")
+        if isinstance(result, dict) and result.get("error_code") == "llm_error":
+            return True
+    return any(
+        item.get("error_code") == "llm_error"
+        for item in evidence.get("experience_records", [])
+        if isinstance(item, dict)
+    )
 
 
 def _diagnose_from_completion(evidence: dict[str, Any]) -> str | None:
@@ -3343,18 +4045,31 @@ def _summary_metadata_lines(metadata: dict[str, Any]) -> list[str]:
     selection = metadata.get("selection") if isinstance(metadata.get("selection"), dict) else {}
     execution = metadata.get("execution") if isinstance(metadata.get("execution"), dict) else {}
     llm = metadata.get("llm") if isinstance(metadata.get("llm"), dict) else {}
-    return [
+    health = (
+        metadata.get("llm_health_check")
+        if isinstance(metadata.get("llm_health_check"), dict)
+        else {}
+    )
+    lines = [
         f"- selector.scenario: `{selection.get('scenario') or []}`",
         f"- selector.scenario_glob: `{selection.get('scenario_glob') or []}`",
         f"- selector.scenario_category: `{selection.get('scenario_category') or []}`",
         f"- selector.expect_selected_count: `{selection.get('expect_selected_count')}`",
         f"- execution.dry_run: `{execution.get('dry_run')}`",
         f"- execution.require_real_llm: `{execution.get('require_real_llm')}`",
+        f"- execution.real_llm_health_check: `{execution.get('real_llm_health_check')}`",
         f"- llm.provider: `{llm.get('provider') or ''}`",
         f"- llm.model: `{llm.get('model') or ''}`",
         f"- llm.fallback_provider: `{llm.get('fallback_provider') or ''}`",
         f"- llm.fallback_enabled: `{llm.get('fallback_enabled')}`",
     ]
+    if health:
+        error = health.get("error") if isinstance(health.get("error"), dict) else {}
+        lines.append(f"- llm_health_check.healthy: `{health.get('healthy')}`")
+        if error:
+            lines.append(f"- llm_health_check.error_code: `{error.get('code') or ''}`")
+            lines.append(f"- llm_health_check.error_message: `{error.get('message') or ''}`")
+    return lines
 
 
 def _relative_path(path: Path, root: Path) -> str:
@@ -3404,6 +4119,11 @@ def _run_llm_metadata(summary_metadata: dict[str, Any] | None) -> dict[str, Any]
     metadata = summary_metadata if isinstance(summary_metadata, dict) else {}
     execution = metadata.get("execution") if isinstance(metadata.get("execution"), dict) else {}
     llm = metadata.get("llm") if isinstance(metadata.get("llm"), dict) else {}
+    health = (
+        metadata.get("llm_health_check")
+        if isinstance(metadata.get("llm_health_check"), dict)
+        else {}
+    )
     return {
         "run_llm_provider": str(llm.get("provider") or ""),
         "run_llm_model": str(llm.get("model") or ""),
@@ -3413,9 +4133,15 @@ def _run_llm_metadata(summary_metadata: dict[str, Any] | None) -> dict[str, Any]
         ),
         "run_dry_run": bool(execution.get("dry_run")) if "dry_run" in execution else None,
         "run_real_llm_required": (
-            bool(execution.get("require_real_llm"))
-            if "require_real_llm" in execution
+            bool(execution.get("require_real_llm")) if "require_real_llm" in execution else None
+        ),
+        "run_llm_health_check_enabled": (
+            bool(execution.get("real_llm_health_check"))
+            if "real_llm_health_check" in execution
             else None
+        ),
+        "run_llm_health_check_healthy": (
+            bool(health.get("healthy")) if "healthy" in health else None
         ),
     }
 
@@ -3917,7 +4643,9 @@ def _write_evidence_index(run_root: Path, output_json: Path) -> dict[str, Any]:
         summary = _load_json(summary_path)
         if not isinstance(summary, dict):
             continue
-        summary_metadata = summary.get("metadata") if isinstance(summary.get("metadata"), dict) else {}
+        summary_metadata = (
+            summary.get("metadata") if isinstance(summary.get("metadata"), dict) else {}
+        )
         run_llm = _run_llm_metadata(summary_metadata)
         results = [item for item in summary.get("results", []) if isinstance(item, dict)]
         runs.append(
@@ -3975,6 +4703,7 @@ def _write_evidence_index(run_root: Path, output_json: Path) -> dict[str, Any]:
             ),
             "by_run_llm_provider": _count_case_values(cases, _run_llm_providers),
             "by_run_llm_model": _count_case_values(cases, _run_llm_models),
+            "by_llm_health": _count_case_values(cases, _llm_health_signals),
         },
         "runs": runs,
         "cases": cases,
@@ -4631,6 +5360,20 @@ def _llm_usage_signals(case: dict[str, Any]) -> list[str]:
     return values
 
 
+def _llm_health_signals(case: dict[str, Any]) -> list[str]:
+    enabled = case.get("run_llm_health_check_enabled")
+    healthy = case.get("run_llm_health_check_healthy")
+    if enabled is True:
+        if healthy is True:
+            return ["health_check:enabled", "health_check:passed"]
+        if healthy is False:
+            return ["health_check:enabled", "health_check:failed"]
+        return ["health_check:enabled", "health_check:unknown"]
+    if enabled is False:
+        return ["health_check:not_run"]
+    return ["health_check:not_recorded"]
+
+
 def _run_llm_providers(case: dict[str, Any]) -> list[str]:
     provider = str(case.get("run_llm_provider") or "")
     return [provider] if provider else []
@@ -4720,6 +5463,7 @@ def _case_matches_evidence_filters(
     run_llm_providers: list[str],
     run_llm_models: list[str],
     llm_usage_signals: list[str],
+    llm_health_signals: list[str],
     learning_kinds: list[str],
     learning_validation_statuses: list[str],
     skill_validation_statuses: list[str],
@@ -4762,6 +5506,7 @@ def _case_matches_evidence_filters(
         and _matches_values(_run_llm_providers(case), run_llm_providers)
         and _matches_values(_run_llm_models(case), run_llm_models)
         and _matches_values(_llm_usage_signals(case), llm_usage_signals)
+        and _matches_values(_llm_health_signals(case), llm_health_signals)
         and _matches_values(_learning_evidence_kinds(case), learning_kinds)
         and _matches_values(_learning_validation_statuses(case), learning_validation_statuses)
         and _matches_values(_skill_validation_statuses(case), skill_validation_statuses)
@@ -4836,6 +5581,9 @@ def _compact_evidence_case(case: dict[str, Any]) -> dict[str, Any]:
         "llm_total_tokens": _case_int_value(case, "llm_total_tokens"),
         "duration_seconds": _case_float_value(case, "duration_seconds"),
         "llm_usage_signals": _llm_usage_signals(case),
+        "llm_health_signals": _llm_health_signals(case),
+        "run_llm_health_check_enabled": case.get("run_llm_health_check_enabled"),
+        "run_llm_health_check_healthy": case.get("run_llm_health_check_healthy"),
         "embedding_providers": _string_values(_embedding_summary(case).get("providers")),
         "embedding_models": _string_values(_embedding_summary(case).get("models")),
         "vector_match_count": int(_embedding_summary(case).get("vector_match_count") or 0),
@@ -4887,6 +5635,7 @@ def query_evidence_index(
     run_llm_providers: list[str] | None = None,
     run_llm_models: list[str] | None = None,
     llm_usage_signals: list[str] | None = None,
+    llm_health_signals: list[str] | None = None,
     learning_kinds: list[str] | None = None,
     learning_validation_statuses: list[str] | None = None,
     skill_validation_statuses: list[str] | None = None,
@@ -4922,6 +5671,7 @@ def query_evidence_index(
         "run_llm_provider": _split_filter_values(run_llm_providers),
         "run_llm_model": _split_filter_values(run_llm_models),
         "llm_usage": _split_filter_values(llm_usage_signals),
+        "llm_health": _split_filter_values(llm_health_signals),
         "learning_kind": _split_filter_values(learning_kinds),
         "learning_validation": _split_filter_values(learning_validation_statuses),
         "skill_validation": _split_filter_values(skill_validation_statuses),
@@ -4959,6 +5709,7 @@ def query_evidence_index(
             run_llm_providers=filters["run_llm_provider"],
             run_llm_models=filters["run_llm_model"],
             llm_usage_signals=filters["llm_usage"],
+            llm_health_signals=filters["llm_health"],
             learning_kinds=filters["learning_kind"],
             learning_validation_statuses=filters["learning_validation"],
             skill_validation_statuses=filters["skill_validation"],
@@ -5025,6 +5776,7 @@ def query_evidence_index(
         "by_run_llm_provider": _count_case_values(matched, _run_llm_providers),
         "by_run_llm_model": _count_case_values(matched, _run_llm_models),
         "by_llm_usage": _count_case_values(matched, _llm_usage_signals),
+        "by_llm_health": _count_case_values(matched, _llm_health_signals),
         "by_learning_kind": _count_case_values(matched, _learning_evidence_kinds),
         "by_learning_validation": _count_case_values(matched, _learning_validation_statuses),
         "by_skill_validation": _count_case_values(matched, _skill_validation_statuses),
@@ -5104,6 +5856,7 @@ def render_evidence_query_markdown(payload: dict[str, Any]) -> str:
         "run_llm_provider",
         "run_llm_model",
         "llm_usage",
+        "llm_health",
         "learning_kind",
         "learning_validation",
         "skill_validation",
@@ -5166,6 +5919,7 @@ def render_evidence_query_markdown(payload: dict[str, Any]) -> str:
             _markdown_count_line("run_llm_provider", summary.get("by_run_llm_provider", {})),
             _markdown_count_line("run_llm_model", summary.get("by_run_llm_model", {})),
             _markdown_count_line("llm_usage", summary.get("by_llm_usage", {})),
+            _markdown_count_line("llm_health", summary.get("by_llm_health", {})),
             _markdown_count_line("learning_kind", summary.get("by_learning_kind", {})),
             _markdown_count_line(
                 "learning_validation",
@@ -5183,8 +5937,8 @@ def render_evidence_query_markdown(payload: dict[str, Any]) -> str:
             "",
             "## Cases",
             "",
-            "| Run | Scenario | Category | Requires | Status | Skip Reason | Failure Layer | Completion Layers | Policy Decisions | Skipped Stages | Policy Risk Flags | Policy Reasons | Policy Context Budget | Request Payload Stats | Node Status | Critic Actions | Memory Retrieval | Run LLM Provider | Run LLM Model | LLM Usage | Skills | Procedures | Habits | Lineage Skills | Promotion Types | Promotion Targets | Learning Validation | Skill Validation | Review Decisions | Audit Events | Permissions | Learning Kinds | Diagnostics |",
-            "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+            "| Run | Scenario | Category | Requires | Status | Skip Reason | Failure Layer | Completion Layers | Policy Decisions | Skipped Stages | Policy Risk Flags | Policy Reasons | Policy Context Budget | Request Payload Stats | Node Status | Critic Actions | Memory Retrieval | Run LLM Provider | Run LLM Model | LLM Usage | LLM Health | Skills | Procedures | Habits | Lineage Skills | Promotion Types | Promotion Targets | Learning Validation | Skill Validation | Review Decisions | Audit Events | Permissions | Learning Kinds | Diagnostics |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
         ]
     )
     for case in payload.get("cases", []):
@@ -5214,6 +5968,7 @@ def render_evidence_query_markdown(payload: dict[str, Any]) -> str:
             f"{_markdown_cell(case.get('run_llm_provider'))} | "
             f"{_markdown_cell(case.get('run_llm_model'))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('llm_usage_signals'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('llm_health_signals'))))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('used_skills'))))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('procedure_ids'))))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('habit_ids'))))} | "
@@ -5370,6 +6125,7 @@ def _learning_lineage_query(payload: dict[str, Any], *, limit: int) -> dict[str,
     summary["by_run_llm_provider"] = _count_case_values(returned, _run_llm_providers)
     summary["by_run_llm_model"] = _count_case_values(returned, _run_llm_models)
     summary["by_llm_usage"] = _count_case_values(returned, _llm_usage_signals)
+    summary["by_llm_health"] = _count_case_values(returned, _llm_health_signals)
     return {
         "schema_version": EVIDENCE_QUERY_SCHEMA_VERSION,
         "source_schema_version": payload.get("schema_version"),
@@ -5486,6 +6242,7 @@ def _dashboard_filtered_query(
         "by_run_llm_provider": _count_case_values(matched, _run_llm_providers),
         "by_run_llm_model": _count_case_values(matched, _run_llm_models),
         "by_llm_usage": _count_case_values(matched, _llm_usage_signals),
+        "by_llm_health": _count_case_values(matched, _llm_health_signals),
         "by_learning_kind": _count_case_values(
             matched,
             lambda case: _string_values(case.get("learning_evidence_kinds")),
@@ -6068,6 +6825,23 @@ def _dashboard_regression_commands(
             {
                 "kind": "llm_usage_query",
                 "label": f"LLM usage {signal}",
+                "command": command,
+                "matched_cases": int(count or 0),
+            }
+        )
+
+    for signal, count in sorted((dashboard_summary.get("by_llm_health") or {}).items()):
+        signal = str(signal).strip()
+        if signal not in {"health_check:failed", "health_check:passed"}:
+            continue
+        command = _dashboard_query_command("evidence-llm-health", signal)
+        if command in seen:
+            continue
+        seen.add(command)
+        commands.append(
+            {
+                "kind": "llm_health_query",
+                "label": f"LLM health {signal}",
                 "command": command,
                 "matched_cases": int(count or 0),
             }
@@ -6854,6 +7628,19 @@ def build_evidence_dashboard(
                 limit=limit,
             ),
         },
+        "llm_health_check_cases": {
+            "title": "LLM Health Check Cases",
+            "description": "集中查看真实 provider health check 失败或通过的 case，避免把配置失败误当成规划或工具选择回归。",
+            "query_command": _dashboard_query_command(
+                "evidence-llm-health",
+                "health_check:failed",
+            ),
+            "query": query_evidence_index(
+                payload,
+                llm_health_signals=["health_check:failed"],
+                limit=limit,
+            ),
+        },
         "llm_cost_hotspot_cases": {
             "title": "Runtime Cost Hotspot Cases",
             "description": "集中查看高 token 或长耗时 case，优先定位 runtime 成本热点和可优化回归样本。",
@@ -7395,6 +8182,7 @@ def build_evidence_dashboard(
             "by_run_llm_provider": all_cases["summary"]["by_run_llm_provider"],
             "by_run_llm_model": all_cases["summary"]["by_run_llm_model"],
             "by_llm_usage": all_cases["summary"]["by_llm_usage"],
+            "by_llm_health": all_cases["summary"]["by_llm_health"],
             "by_learning_kind": all_cases["summary"]["by_learning_kind"],
             "by_learning_validation": all_cases["summary"]["by_learning_validation"],
             "by_skill_validation": all_cases["summary"]["by_skill_validation"],
@@ -7411,8 +8199,8 @@ def build_evidence_dashboard(
 
 def _render_dashboard_cases(query: dict[str, Any]) -> list[str]:
     lines = [
-        "| Run | Scenario | Category | Requires | Status | Skip Reason | Failure Layer | Policy Decisions | Skipped Stages | Policy Risk Flags | Policy Reasons | Policy Context Budget | Request Payload Stats | Node Status | Critic Actions | Run LLM Provider | Run LLM Model | LLM Usage | Skills | Lineage | Match | Promotion Types | Promotion Targets | Diagnostics |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| Run | Scenario | Category | Requires | Status | Skip Reason | Failure Layer | Policy Decisions | Skipped Stages | Policy Risk Flags | Policy Reasons | Policy Context Budget | Request Payload Stats | Node Status | Critic Actions | Run LLM Provider | Run LLM Model | LLM Usage | LLM Health | Skills | Lineage | Match | Promotion Types | Promotion Targets | Diagnostics |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for case in query.get("cases", []):
         if not isinstance(case, dict):
@@ -7444,6 +8232,7 @@ def _render_dashboard_cases(query: dict[str, Any]) -> list[str]:
             f"{_markdown_cell(case.get('run_llm_provider'))} | "
             f"{_markdown_cell(case.get('run_llm_model'))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('llm_usage_signals'))))} | "
+            f"{_markdown_cell(_markdown_value_list(_string_values(case.get('llm_health_signals'))))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('used_skills'))))} | "
             f"{_markdown_cell(_markdown_value_list(lineage_values))} | "
             f"{_markdown_cell(_markdown_value_list(_string_values(case.get('procedure_match_summaries'))))} | "
@@ -7453,7 +8242,7 @@ def _render_dashboard_cases(query: dict[str, Any]) -> list[str]:
         )
     if len(lines) == 2:
         lines.append(
-            "| - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |"
+            "| - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |"
         )
     return lines
 
@@ -7513,6 +8302,7 @@ def render_evidence_dashboard_markdown(payload: dict[str, Any]) -> str:
         _markdown_count_line("run_llm_provider", summary.get("by_run_llm_provider", {})),
         _markdown_count_line("run_llm_model", summary.get("by_run_llm_model", {})),
         _markdown_count_line("llm_usage", summary.get("by_llm_usage", {})),
+        _markdown_count_line("llm_health", summary.get("by_llm_health", {})),
         _markdown_count_line("learning_kind", summary.get("by_learning_kind", {})),
         _markdown_count_line(
             "learning_validation",
@@ -7578,6 +8368,7 @@ def render_evidence_dashboard_markdown(payload: dict[str, Any]) -> str:
         "completion_evaluation_cases",
         "memory_retrieval_cases",
         "llm_usage_cases",
+        "llm_health_check_cases",
         "llm_cost_hotspot_cases",
         "execution_policy_cases",
         "planner_skipped_cases",
@@ -7676,6 +8467,7 @@ def _write_evidence_index_markdown(path: Path, payload: dict[str, Any]) -> None:
         _markdown_count_line("failure_layer", summary.get("by_failure_layer", {})),
         _markdown_count_line("run_llm_provider", summary.get("by_run_llm_provider", {})),
         _markdown_count_line("run_llm_model", summary.get("by_run_llm_model", {})),
+        _markdown_count_line("llm_health", summary.get("by_llm_health", {})),
         "",
         "## Cases",
         "",
@@ -7758,6 +8550,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Fail before execution when the configured LLM provider is "
             "test/stub/mock/fake/rule_based"
+        ),
+    )
+    parser.add_argument(
+        "--real-llm-health-check",
+        action="store_true",
+        help=(
+            "With --require-real-llm, call the configured LLM once before scenario "
+            "execution and stop early when the provider is unhealthy."
         ),
     )
     parser.add_argument("--check-only", action="store_true", help="Validate scenario file and exit")
@@ -7970,6 +8770,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--evidence-llm-health",
+        action="append",
+        help=(
+            "Filter evidence query by run-level LLM health-check signal "
+            "(health_check:passed, health_check:failed, health_check:not_run, "
+            "health_check:not_recorded)"
+        ),
+    )
+    parser.add_argument(
         "--evidence-learning-kind",
         action="append",
         help=(
@@ -8088,6 +8897,9 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.expect_selected_count is not None and args.expect_selected_count < 0:
         print("--expect-selected-count must be non-negative", file=sys.stderr)
+        return 2
+    if args.real_llm_health_check and not args.require_real_llm:
+        print("--real-llm-health-check requires --require-real-llm", file=sys.stderr)
         return 2
     if args.require_real_llm:
         guard_error = _real_llm_guard_error()
@@ -8212,6 +9024,7 @@ def main(argv: list[str] | None = None) -> int:
             run_llm_providers=args.evidence_run_llm_provider,
             run_llm_models=args.evidence_run_llm_model,
             llm_usage_signals=args.evidence_llm_usage,
+            llm_health_signals=args.evidence_llm_health,
             learning_kinds=args.evidence_learning_kind,
             learning_validation_statuses=args.evidence_learning_validation,
             skill_validation_statuses=args.evidence_skill_validation,
@@ -8307,10 +9120,7 @@ def main(argv: list[str] | None = None) -> int:
     run_metadata = _run_metadata(args)
     selected, results = _select_scenarios(scenarios, args)
 
-    if (
-        args.expect_selected_count is not None
-        and len(selected) != args.expect_selected_count
-    ):
+    if args.expect_selected_count is not None and len(selected) != args.expect_selected_count:
         _write_selection_preview(
             run_dir=run_dir,
             selected=selected,
@@ -8338,11 +9148,24 @@ def main(argv: list[str] | None = None) -> int:
             metadata=run_metadata,
         )
         print(f"dry_run: {run_dir / 'summary.md'}")
-        print(
-            f"selected={len(selected)} skipped={len(results)} "
-            "passed=0 failed=0 executed=0"
-        )
+        print(f"selected={len(selected)} skipped={len(results)} passed=0 failed=0 executed=0")
         return 0
+
+    if args.require_real_llm and args.real_llm_health_check:
+        health = _real_llm_health_check()
+        run_metadata["llm_health_check"] = health
+        if not health.get("healthy"):
+            _write_selection_preview(
+                run_dir=run_dir,
+                selected=selected,
+                skipped_results=results,
+                metadata=run_metadata,
+            )
+            print(
+                f"real_llm_health_check_failed: summary={run_dir / 'summary.md'}",
+                file=sys.stderr,
+            )
+            return 2
 
     for scenario in selected:
         results.append(_run_one(scenario=scenario, run_dir=run_dir, args=args))

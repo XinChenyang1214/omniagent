@@ -1,15 +1,15 @@
 # Procedure Memory Spec
 
-Last reviewed: 2026-06-12
+Last reviewed: 2026-07-31
 
 ## 文档状态
 
 - Document type: spec
 - Workstream: `META-010`
-- Document status: confirmed
+- Document status: active
 - Implementation status: implemented
 - Authority scope: procedure / verified procedure / habit 的生命周期、存储、检索和升级规则
-- Parent workstream: [`AGENT_USABILITY_LEARNING_LOOP_MVP.md`](../workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md)
+- Completion evidence: [`AGENT_USABILITY_LEARNING_LOOP_MVP.md`](../workstreams/completed/AGENT_USABILITY_LEARNING_LOOP_MVP.md)
 
 Scope note: 本 spec 覆盖 procedure / habit 生命周期和 fast path；habit -> skill promotion 的实现归 Phase 5。
 

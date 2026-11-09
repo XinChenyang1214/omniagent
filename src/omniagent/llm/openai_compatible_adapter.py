@@ -9,6 +9,7 @@ import urllib.request
 import uuid
 from typing import Any
 
+from omniagent import __version__
 from omniagent.config import LLMConfig
 from omniagent.errors import ErrorCode, OmniAgentError
 from omniagent.llm.base import LLMAdapter
@@ -30,8 +31,45 @@ class OpenAICompatibleAdapter(LLMAdapter):
 
     def __init__(self, config: LLMConfig) -> None:
         self.config = config
-        self.endpoint = self._resolve_endpoint(config.api_base)
-        if not config.api_key and not self._is_local_endpoint(self.endpoint):
+        self.model = config.model.strip()
+        if config.provider.lower() == "openrouter" and not self.model:
+            self.model = "openrouter/free"
+        if config.provider.lower() == "opencode" and not self.model:
+            self.model = "deepseek-v4-flash-free"
+        if (
+            config.provider.lower() == "openrouter"
+            and config.openrouter_free_only
+            and not self._is_openrouter_free_model(self.model)
+        ):
+            raise OmniAgentError(
+                ErrorCode.CONFIG_INVALID,
+                "OpenRouter free-only 模式只允许 openrouter/free 或 :free 模型",
+                details={
+                    "provider": config.provider,
+                    "model": self.model,
+                    "openrouter_free_only": True,
+                },
+            )
+        if (
+            config.provider.lower() == "opencode"
+            and config.opencode_free_only
+            and not self._is_opencode_free_model(self.model)
+        ):
+            raise OmniAgentError(
+                ErrorCode.CONFIG_INVALID,
+                "OpenCode Zen free-only 模式只允许以 -free 结尾的模型",
+                details={
+                    "provider": config.provider,
+                    "model": self.model,
+                    "opencode_free_only": True,
+                },
+            )
+        self.endpoint = self._resolve_endpoint(config.api_base, provider=config.provider)
+        if (
+            not config.api_key
+            and not self._is_local_endpoint(self.endpoint)
+            and not self._allows_anonymous_opencode_request()
+        ):
             raise OmniAgentError(
                 ErrorCode.CONFIG_INVALID,
                 f"缺少 LLM API Key (provider={config.provider})",
@@ -56,7 +94,8 @@ class OpenAICompatibleAdapter(LLMAdapter):
         return {
             "healthy": bool(response.structured_output.get("ok", False)),
             "provider": self.config.provider,
-            "model": self.config.model,
+            "model": response.model,
+            "requested_model": self.model,
             "endpoint": self.endpoint,
             "request_id": response.request_id,
         }
@@ -159,7 +198,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
         latency_ms = round((time.perf_counter() - perf_start) * 1000, 2)
         return LLMResponse(
             provider=self.config.provider,
-            model=self.config.model,
+            model=str(raw.get("model") or self.model),
             prompt_name=prompt_name,
             request_id=str(raw.get("id", request_id)),
             raw_output=raw_output,
@@ -185,7 +224,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
         """Tier 1: ``response_format`` with ``json_schema``."""
         safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", prompt_name)
         return {
-            "model": self.config.model,
+            "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
@@ -209,7 +248,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
     ) -> dict[str, Any]:
         """Tier 2: ``response_format`` with ``json_object`` + schema in prompt."""
         return {
-            "model": self.config.model,
+            "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "system", "content": schema_instruction},
@@ -227,7 +266,7 @@ class OpenAICompatibleAdapter(LLMAdapter):
     ) -> dict[str, Any]:
         """Tier 3: no ``response_format``, schema in prompt only (universal)."""
         return {
-            "model": self.config.model,
+            "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "system", "content": schema_instruction},
@@ -397,9 +436,17 @@ class OpenAICompatibleAdapter(LLMAdapter):
         return "timed out" in str(err).lower()
 
     def _headers(self) -> dict[str, str]:
-        h = {"Content-Type": "application/json"}
+        h = {
+            "Content-Type": "application/json",
+            "User-Agent": f"OmniAgent/{__version__}",
+        }
         if self.config.api_key:
             h["Authorization"] = f"Bearer {self.config.api_key}"
+        if self.config.provider.lower() == "openrouter":
+            if self.config.openrouter_site_url:
+                h["HTTP-Referer"] = self.config.openrouter_site_url
+            if self.config.openrouter_app_title:
+                h["X-OpenRouter-Title"] = self.config.openrouter_app_title
         return h
 
     def _schema_instruction(self, schema: dict[str, Any]) -> str:
@@ -409,8 +456,12 @@ class OpenAICompatibleAdapter(LLMAdapter):
             f"{json.dumps(schema, ensure_ascii=False, indent=2)}"
         )
 
-    def _resolve_endpoint(self, api_base: str | None) -> str:
+    def _resolve_endpoint(self, api_base: str | None, *, provider: str = "") -> str:
         if not api_base:
+            if provider.lower() == "openrouter":
+                return "https://openrouter.ai/api/v1/chat/completions"
+            if provider.lower() == "opencode":
+                return "https://opencode.ai/zen/v1/chat/completions"
             return "https://api.openai.com/v1/chat/completions"
         if api_base.rstrip("/").endswith("/chat/completions"):
             return api_base
@@ -419,6 +470,23 @@ class OpenAICompatibleAdapter(LLMAdapter):
     @staticmethod
     def _is_local_endpoint(endpoint: str) -> bool:
         return any(host in endpoint for host in ("localhost", "127.0.0.1", "0.0.0.0", "[::1]"))
+
+    @staticmethod
+    def _is_openrouter_free_model(model: str) -> bool:
+        normalized = model.strip().lower()
+        return normalized == "openrouter/free" or normalized.endswith(":free")
+
+    @staticmethod
+    def _is_opencode_free_model(model: str) -> bool:
+        return model.strip().lower().endswith("-free")
+
+    def _allows_anonymous_opencode_request(self) -> bool:
+        return (
+            self.config.provider.lower() == "opencode"
+            and self.config.opencode_allow_anonymous
+            and self.config.opencode_free_only
+            and self._is_opencode_free_model(self.model)
+        )
 
     @staticmethod
     def _read_error_body(exc: urllib.error.HTTPError) -> str | None:

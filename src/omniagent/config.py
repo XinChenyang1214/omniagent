@@ -92,6 +92,11 @@ class LLMConfig:
     model: str = ""
     api_key: str | None = None
     api_base: str | None = None
+    openrouter_free_only: bool = True
+    openrouter_site_url: str = ""
+    openrouter_app_title: str = "OmniAgent"
+    opencode_free_only: bool = True
+    opencode_allow_anonymous: bool = False
     timeout_seconds: int = 120
     max_retries: int = 2
     temperature: float = 0.0
@@ -173,25 +178,72 @@ class AppConfig:
         log_cfg = file_cfg.get("logging", {})
 
         # -- LLM --
+        provider = str(
+            _get("OMNIAGENT_LLM_PROVIDER", llm_cfg.get("provider"), "openai")
+        ).strip()
+        provider_name = provider.lower()
+        if provider_name == "openrouter":
+            provider_api_key = os.getenv("OPENROUTER_API_KEY")
+        elif provider_name == "opencode":
+            provider_api_key = os.getenv("OPENCODE_API_KEY")
+        elif provider_name == "ark":
+            provider_api_key = os.getenv("ARK_API_KEY")
+        else:
+            provider_api_key = os.getenv("OPENAI_API_KEY") or os.getenv("ARK_API_KEY")
         api_key = (
             os.getenv("OMNIAGENT_LLM_API_KEY")
-            or os.getenv("OPENAI_API_KEY")
-            or os.getenv("ARK_API_KEY")
+            or provider_api_key
             or llm_cfg.get("api_key")
             or None
         )
         if api_key == "":
             api_key = None
 
+        if provider_name == "openrouter":
+            provider_api_base = os.getenv("OPENROUTER_API_BASE")
+        elif provider_name == "opencode":
+            provider_api_base = os.getenv("OPENCODE_API_BASE")
+        else:
+            provider_api_base = os.getenv("ARK_BASE_URL") or os.getenv("ARK_API_BASE")
         api_base = (
             os.getenv("OMNIAGENT_LLM_API_BASE")
-            or os.getenv("ARK_BASE_URL")
-            or os.getenv("ARK_API_BASE")
+            or provider_api_base
             or llm_cfg.get("api_base")
+            or (
+                "https://openrouter.ai/api/v1"
+                if provider_name == "openrouter"
+                else (
+                    "https://opencode.ai/zen/v1"
+                    if provider_name == "opencode"
+                    else None
+                )
+            )
             or None
         )
         if api_base == "":
             api_base = None
+
+        if provider_name == "openrouter":
+            default_model = "openrouter/free"
+        elif provider_name == "opencode":
+            default_model = "deepseek-v4-flash-free"
+        else:
+            default_model = ""
+        model = str(_get("OMNIAGENT_LLM_MODEL", llm_cfg.get("model"), default_model)).strip()
+        if not model:
+            model = default_model
+        openrouter_site_url = str(
+            os.getenv("OMNIAGENT_OPENROUTER_SITE_URL")
+            or os.getenv("OPENROUTER_SITE_URL")
+            or llm_cfg.get("openrouter_site_url")
+            or ""
+        ).strip()
+        openrouter_app_title = str(
+            os.getenv("OMNIAGENT_OPENROUTER_APP_TITLE")
+            or os.getenv("OPENROUTER_APP_TITLE")
+            or llm_cfg.get("openrouter_app_title")
+            or "OmniAgent"
+        ).strip()
 
         embedding_api_key = (
             os.getenv("OMNIAGENT_EMBEDDING_API_KEY") or emb_cfg.get("api_key") or None
@@ -246,10 +298,27 @@ class AppConfig:
 
         return cls(
             llm=LLMConfig(
-                provider=str(_get("OMNIAGENT_LLM_PROVIDER", llm_cfg.get("provider"), "openai")),
-                model=str(_get("OMNIAGENT_LLM_MODEL", llm_cfg.get("model"), "")),
+                provider=provider,
+                model=model,
                 api_key=api_key,
                 api_base=api_base,
+                openrouter_free_only=_get_bool_merged(
+                    "OMNIAGENT_OPENROUTER_FREE_ONLY",
+                    llm_cfg.get("openrouter_free_only"),
+                    True,
+                ),
+                openrouter_site_url=openrouter_site_url,
+                openrouter_app_title=openrouter_app_title,
+                opencode_free_only=_get_bool_merged(
+                    "OMNIAGENT_OPENCODE_FREE_ONLY",
+                    llm_cfg.get("opencode_free_only"),
+                    True,
+                ),
+                opencode_allow_anonymous=_get_bool_merged(
+                    "OMNIAGENT_OPENCODE_ALLOW_ANONYMOUS",
+                    llm_cfg.get("opencode_allow_anonymous"),
+                    False,
+                ),
                 timeout_seconds=int(
                     _get("OMNIAGENT_LLM_TIMEOUT", llm_cfg.get("timeout_seconds"), 120)
                 ),

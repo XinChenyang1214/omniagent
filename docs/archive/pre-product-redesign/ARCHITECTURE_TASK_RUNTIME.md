@@ -1,4 +1,8 @@
-# OmniAgent 架构文档
+# OmniAgent 旧 Task Runtime 架构（归档）
+
+> 归档说明：本文保留 2026-06 学习闭环重构前的 task-centric runtime 架构，
+> 仅用于理解迁移背景。当前实现规格以
+> [`../../specs/current-system.md`](../../specs/current-system.md) 为准。
 
 本文档描述 OmniAgent 的当前实现架构。源代码是事实真理——本文档描述意图和模块关系，不追求穷尽细节。
 

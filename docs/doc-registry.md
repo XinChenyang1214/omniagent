@@ -1,90 +1,82 @@
 # 文档登记表
 
-Last reviewed：2026-06-22
+Last reviewed: 2026-07-31
 
-本登记表记录文档治理状态。`implementation_status` 反映本次整理时文档中记载的项目状态；除非特别说明，它不是一次新的代码审计结论。
+本表只登记当前 governing 文档、长期操作文档和具有独立历史价值的文档组。
+生成报告、eval run、临时分析和每个模块 README 不逐项登记。
 
-## 状态说明
+## 状态语义
 
-- `active`：当前有效文档。
-- `confirmed`：已确认，可作为当前专项的工作契约。
-- `completed`：已完成工作的过程文档，保留为历史证据。
-- `superseded`：已被新文档替代，不再作为当前实现契约。
-- `archived`：归档历史资料，不再作为当前实现契约。
-- `draft`：讨论或想法记录，不作为实现契约。
-- `not_applicable`：不直接对应实现状态，通常是索引、规则或参考文档。
-- `not_started`：目标或设计已记录，但尚未进入实现。
-- `partial`：曾部分实现，但不代表当前新主线已完成。
-- `implemented_unverified`：文档描述了已实现行为，但本次整理没有重新跑验证。
-- `verified`：文档自身记录了该专项的验证证据。
-- `implementing`：当前仍有未完成工作。
-- `deprecated`：旧实现或旧工作流已被新主线取代，不再继续推进。
+- `active`：当前有效。
+- `completed`：工作已完成，保留为验收或迁移记录。
+- `archived`：仅有历史权威，不约束当前实现。
+- `deleted`：内容已完整沉淀且没有独立保留价值。
 
-## 顶层文档
+## 当前有效文档
 
-| Path | Document type | Workstream | Document status | Implementation status | Authority scope | Replacement |
-|---|---|---|---|---|---|---|
-| `README.md` | current-state / entry | project overview | active | not_applicable | 公开入口、安装、快速开始、workspace 结构、当前状态摘要 | none |
-| `docs/README.md` | current-state / operations | document governance | active | not_applicable | 文档阅读顺序和更新规则 | none |
-| `docs/doc-registry.md` | current-state / registry | document governance | active | not_applicable | 文档权威边界、生命周期状态和替代关系 | none |
-| `docs/product-architecture.md` | architecture / product strategy | smart learning agent redesign | active | not_started | 通用个人 Agent OS 的目标产品架构、设计思想、学习闭环和后续路线取舍 | none |
-| `docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md` | implementation / architecture | `META-010` | confirmed | implementing | 按通用个人 Agent OS 架构重开发的首个开发契约、验收矩阵和阶段计划 | none |
-| `docs/specs/agent-state.md` | spec | `META-010` / Agent state | confirmed | implemented | `AgentProfile`、`UserPreference`、`ProjectState`、`CurrentGoal` 的最小数据契约和验收标准 | none |
-| `docs/specs/experience-record.md` | spec | `META-010` / Experience records | confirmed | implemented | 任务经验记录的 schema、写入时机、evidence 和 promotion gate 边界 | none |
-| `docs/specs/procedure-memory.md` | spec | `META-010` / Procedure memory | confirmed | implemented | procedure / verified procedure / habit 的生命周期、存储、检索、升级规则和 Phase 4 habit fast path；skill promotion 归 Phase 5 | none |
-| `docs/specs/skill-promotion.md` | spec | `META-010` / Skill promotion | confirmed | implemented | stable habit -> skill promotion 的 gate、lineage、contract、权限和验证规则 | none |
-| `docs/specs/learning-feedback.md` | spec | `META-010` / Learning feedback | confirmed | verified | 任务结束后向用户展示 experience / procedure / habit 学习状态、复用判断和治理入口的最小输出契约；真实评测 evidence index / dashboard 已接入 `learning_feedbacks` | none |
-| `docs/specs/learning-correction.md` | spec | `META-010` / Learning correction | confirmed | verified | procedure / habit 复用失败、过期或用户修正后的纠错、降级、冻结、解释、复审和恢复证据契约；真实评测 evidence index / dashboard 已接入 `learning_corrections` | none |
-| `AGENTS.md` | operations / project rules | agent collaboration | active | not_applicable | 项目规则、常用命令、安全边界、权威文档顺序 | none |
-| `ARCHITECTURE.md` | current-state / architecture | legacy core runtime | active | implemented_unverified | 旧实现架构和迁移输入；不再作为目标产品架构 | `docs/product-architecture.md` for target architecture |
-| `CONFIGURATION.md` | spec / operations | runtime configuration | active | implemented_unverified | 配置文件、环境变量、provider、权限和沙箱选项 | none |
-| `ROADMAP.md` | roadmap | project planning | active | implementing | 当前优先级、已完成里程碑和待排期方向 | none |
-| `issue.md` | change-fix / issue tracker | project planning | active | implementing | 开放 META / ISSUE、已关闭问题、真实评测状态 | none |
-| `REAL_WORLD_EVAL_PLAN.md` | validation / operations | real-world evaluation | active | implemented_unverified | 真实评测 runner 流程、场景分类、diagnostics、failure attribution、安全边界 | none |
-| `CLAUDE.md` | operations / assistant guide | AI coding assistant context | active | not_applicable | 面向其他 AI 编程助手的项目摘要、命令和约定 | partially covered by `AGENTS.md` and this registry |
+| Path | Role | Authority scope | Implementation | Replacement |
+|---|---|---|---|---|
+| `README.md` | entry | 安装、快速开始、公开命令和状态摘要 | current | none |
+| `AGENTS.md` | project rules | 工程规则、安全边界、验证和文档维护 | current | none |
+| `docs/README.md` | governance entry | 阅读顺序、文档区域和维护规则 | current | none |
+| `docs/doc-registry.md` | registry | 权威、生命周期与替代关系 | current | none |
+| `docs/specs/README.md` | spec index | 当前规格入口 | current | none |
+| `docs/specs/current-system.md` | system spec | 当前系统边界、链路、模块、证据和安全不变量 | verified_offline | root `ARCHITECTURE.md` |
+| `docs/specs/task-intake.md` | behavior spec | Task Intake schema、时机和边界 | verified | none |
+| `docs/specs/agent-state.md` | data spec | Agent state schema 和存储边界 | implemented | none |
+| `docs/specs/experience-record.md` | data spec | ExperienceRecord 和 learning gate | implemented | none |
+| `docs/specs/procedure-memory.md` | lifecycle spec | procedure / habit 生命周期与 fast path | implemented | none |
+| `docs/specs/skill-promotion.md` | lifecycle spec | habit -> skill gate、lineage、权限和验证 | implemented | none |
+| `docs/specs/learning-feedback.md` | output spec | 任务结束学习反馈 | verified | none |
+| `docs/specs/learning-correction.md` | correction spec | 复用失败、冻结、复审和恢复 | verified | none |
+| `docs/product-architecture.md` | product architecture | 产品目标和长期取舍 | partially_implemented | none |
+| `CONFIGURATION.md` | config spec | 配置、环境变量和 provider | implemented_unverified | none |
+| `ROADMAP.md` | roadmap | 当前优先级和阶段结果 | current | none |
+| `issue.md` | issue tracker | 未关闭问题和验证阻塞 | current | historical issue archive |
+| `docs/runbooks/real-world-evaluation.md` | runbook | 评测选择、执行、归因和证据消费 | verified_offline | root `REAL_WORLD_EVAL_PLAN.md` |
+| `CLAUDE.md` | compatibility entry | 引导其他助手读取 `AGENTS.md` 和当前文档入口 | current | duplicated guidance removed |
 
-## 模块与区域文档
+## 分布式模块契约
 
-| Path pattern | Document type | Workstream | Document status | Implementation status | Authority scope | Replacement |
-|---|---|---|---|---|---|---|
-| `scripts/README.md` | operations | real-world evaluation tooling | active | implemented_unverified | `scripts/run_real_world_evals.py` 用法和证据产物 | none |
-| `sandbox/README.md` | spec / operations | sandboxing | active | implemented_unverified | 沙箱职责与边界 | none |
-| `memory/files/README.md` | spec | file memory | active | implemented_unverified | 文件记忆模块行为 | none |
-| `memory/graph/README.md` | spec | graph memory | active | implemented_unverified | 图记忆模块行为 | none |
-| `memory/vector/README.md` | spec | vector memory | active | implemented_unverified | 向量记忆模块行为 | none |
-| `skills/builtin/README.md` | spec / inventory | builtin skills | active | implemented_unverified | builtin skill 包结构和约束 | none |
-| `skills/registry/README.md` | spec / inventory | skill registry | active | implemented_unverified | skill registry 包结构和约束 | none |
-| `skills/generated/README.md` | operations / inventory | generated skills | active | not_applicable | 自动生成 skill 产物位置和用途 | none |
-| `shared/skills/README.md` | inventory | shared skill assets | active | not_applicable | 共享 skill 资源位置 | none |
-| `agents/main/skills/README.md` | inventory | main agent skills | active | not_applicable | main agent skill 位置 | none |
-| `src/omniagent/builtin_skills/*/README.md` | spec / operations | builtin skill contract | active | implemented_unverified | 单个 builtin skill 的用途、actions、权限和示例 | none |
-| `src/omniagent/builtin_skills/*/tests/README.md` | validation | builtin skill tests | active | implemented_unverified | 单个 builtin skill 的测试意图和覆盖说明 | none |
-| `src/omniagent/prompts/*.md` | spec | LLM prompt contracts | active | implemented_unverified | Planner、Critic、Router、Responder、Skill generation、Knowledge query、Completion evaluation 的 prompt 输入输出契约 | none |
+以下路径在各自模块范围内有效：
 
-## 归档文档
+- `scripts/README.md`
+- `sandbox/README.md`
+- `memory/*/README.md`
+- `skills/*/README.md`
+- `agents/main/skills/README.md`
+- `shared/skills/README.md`
+- `src/omniagent/builtin_skills/*/README.md`
+- `src/omniagent/builtin_skills/*/tests/README.md`
+- `src/omniagent/prompts/*.md`
 
-| Path | Document type | Workstream | Document status | Implementation status | Authority scope | Replacement |
-|---|---|---|---|---|---|---|
-| `docs/archive/pre-product-redesign/RUNTIME_ORCHESTRATION_PERFORMANCE_UPGRADE.md` | implementation / architecture | `META-009` | superseded | deprecated | Runtime fast path、Planner manifest budget、policy artifact 的旧专项记录；只作迁移参考 | `docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md` |
-| `docs/archive/pre-product-redesign/COMPLEX_CAPABILITY_EVAL_UPGRADE.md` | implementation / validation | `CAP-EVAL-001` / `REAL-EVAL-006` | archived | verified | Completion evaluation、failure attribution、真实 embedding diagnostics、复杂评测矩阵历史证据 | `docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md` for new validation direction |
-| `docs/archive/pre-product-redesign/BASIC_CAPABILITIES_UPGRADE.md` | implementation / validation | `BASECAP-001` | archived | verified | JSON、datetime、CSV、HTTP、safe shell 基础能力升级历史记录 | `docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md` for new capability direction |
-| `docs/archive/pre-product-redesign/BASIC_CAPABILITIES_V1_UPGRADE.md` | implementation / validation | `BASECAP-002` | archived | implemented_unverified | SQLite、Markdown、Git readonly、HTML、Archive、Config builtin skill 首批历史记录 | `docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md` for new capability direction |
-| `docs/archive/pre-product-redesign/IDEAS.md` | exploration | agent memory and learning model | archived | not_applicable | 早期概念捕获，已被正式产品架构吸收 | `docs/product-architecture.md` |
+## 完成记录
 
-## 整理发现
+| Path | Status | Historical scope | Current replacement |
+|---|---|---|---|
+| `docs/workstreams/completed/AGENT_USABILITY_LEARNING_LOOP_MVP.md` | completed | META-010 Phase 0–7 实施与验收 | `docs/specs/` + `ROADMAP.md` |
 
-- 本次整理前没有集中式 registry，文档权威边界分散在 `README.md`、`AGENTS.md`、`ROADMAP.md` 和 `issue.md` 中。
-- `README.md` 和 `AGENTS.md` 曾把 `CAP-EVAL-001` 写成仍处于最高优先级；之后项目一度以 `META-009` 为活跃主线，现已切换到 `META-010`。
-- 2026-06-11 起，项目按 `docs/product-architecture.md` 重新开发，当前 active workstream 切换为 `META-010`。
-- 旧阶段开发文档已归档到 `docs/archive/pre-product-redesign/`，不再作为当前实现契约。
-- `ARCHITECTURE.md` 保留为旧实现 current-state / migration input；目标产品架构以 `docs/product-architecture.md` 为准。
-- 2026-06-12 已补齐 `META-010` Phase 1-5 specs：Agent state、Experience records、Procedure memory、Skill promotion。
-- 2026-06-12 已实现 Phase 1 Agent state、Phase 2 Experience records、Phase 3 Procedure memory、Phase 4 Habit fast path 和 Phase 5 Skill promotion；下一步进入 learning-loop 真实评测与治理增强。
-- 2026-06-15 新增并验证 Learning feedback spec，用于把已有学习闭环状态呈现在 task-ending reply 中，提高用户可感知性；`learning_loop_feedback_sequence` 已把连续任务学习反馈接入 evidence index / dashboard。
-- 2026-06-16 新增并验证 Learning correction spec，用于约束复用失败后的降级、冻结、解释、fresh evidence 复审恢复和 dashboard evidence；`learning_loop_correction_recovery` 已把纠错闭环接入 `learning_corrections` evidence kind。
-- 2026-06-22 明确产品目标为通用能力 Agent，不是代码助手或单一开发工具；README、产品架构、ROADMAP 和 `META-010` workstream 已同步该定位。
-- 2026-06-22 新增 `TaskIntakeAssessment` 和首批 `general_agent_usability_*` 场景，用于验证通用任务的类型识别、风险判断、工具选择、验证策略、权限边界和学习复用/纠错闭环；当前 5 类学习序列、5 个自然语言 tool-choice 场景和 5 个权限边界场景已通过 `--check-only`，并在 `OMNIAGENT_LLM_PROVIDER=test` 离线基线下跑通，真实 LLM provider 基线待建立。
+当前没有 active workstream。下一项开发在目标、验收和范围明确后再创建；不复用已完成
+META-010 文档承载新工作。
 
-## 待确认治理项
+## 归档组
 
-- 是否新增 `docs/validations/` 收纳跨专项评测证据索引。
+| Path | Status | Scope | Current replacement |
+|---|---|---|---|
+| `docs/archive/pre-product-redesign/` | archived | 学习闭环重构前的 task runtime、能力升级和旧评测专项 | `docs/specs/current-system.md`、产品架构和模块规格 |
+| `docs/archive/project-history/ISSUE_TRACKER_THROUGH_2026-06.md` | archived | 旧 META / ISSUE 和评测演进 | `issue.md` |
+| `docs/archive/project-history/REAL_WORLD_EVAL_HISTORY_THROUGH_2026-06.md` | archived | 旧评测计划、阶段基线和演进记录 | `docs/runbooks/real-world-evaluation.md` |
+
+## 本次处置
+
+- 旧根 `ARCHITECTURE.md` 移至
+  `docs/archive/pre-product-redesign/ARCHITECTURE_TASK_RUNTIME.md`。
+- META-010 从 `workstreams/active/` 移至 `workstreams/completed/`。
+- 旧 issue 全量记录和真实评测历史分别归档，根 tracker 与 runbook 只保留当前信息。
+- `docs/archive/pre-product-redesign/IDEAS.md` 已删除；其 learning-as-memory 概念已
+  完整沉淀到产品架构、procedure memory 和 skill promotion 规格。
+
+## 验证限制
+
+`verified_offline` 只表示离线测试和评测通过。真实 LLM tool-choice 基线尚未完成，
+不得把离线 evidence 扩大解释为真实模型验证。

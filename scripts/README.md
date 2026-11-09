@@ -34,4 +34,6 @@ python3 scripts/run_real_world_evals.py --audit-general-agent-usability --audit-
 
 该审计会检查 `general_agent_usability` 是否覆盖 5 类任务的 learning sequence / tool-choice / permission boundary，并从 evidence index 判断 required scenarios 是否都有 passed evidence、5 个 tool-choice 场景是否已有真实 provider dry-run preflight、以及是否已有非 dry-run、非 test provider 的真实 LLM `llm_called` 通过证据。报告会在 `Next Action` 中输出下一条推荐命令；如果推荐真实 baseline，会标记 `requires_user_confirmation` 和 `will_call_real_llm`。当前只想生成缺口报告而不是让命令失败时使用 `--audit-allow-incomplete`。
 
-场景定义见 [`../evals/real_world/scenarios.json`](../evals/real_world/scenarios.json)，流程说明见 [`../REAL_WORLD_EVAL_PLAN.md`](../REAL_WORLD_EVAL_PLAN.md)。
+场景定义见 [`../evals/real_world/scenarios.json`](../evals/real_world/scenarios.json)，
+当前执行与归因流程见
+[`../docs/runbooks/real-world-evaluation.md`](../docs/runbooks/real-world-evaluation.md)。

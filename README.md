@@ -39,20 +39,30 @@ poetry install
 
 ```toml
 [llm]
-provider = "openai"
-model = "gpt-4o-mini"
-api_base = "https://api.openai.com/v1"
+provider = "opencode"
+model = "deepseek-v4-flash-free"
+api_base = "https://opencode.ai/zen/v1"
+enable_runtime_fallback = false
+opencode_free_only = true
+opencode_allow_anonymous = true
 
 [embedding]
 enabled = false
 provider = "local_hash"
 ```
 
-通过环境变量设置 API Key（推荐）：
+仓库当前临时允许 `*-free` 模型在没有 Key 时发起请求，且 2026-07-31 已通过真实
+`llm check`；这是当前端点的实测行为，不是官方稳定承诺。要按官方流程稳定接入，
+请通过环境变量设置 OpenCode Zen API Key：
 
 ```bash
-export OMNIAGENT_LLM_API_KEY=<your-api-key>
+export OPENCODE_API_KEY=<your-opencode-api-key>
 ```
+
+仓库默认使用 OpenCode Zen 当前限时免费的 `deepseek-v4-flash-free`，并开启
+free-only guard，不会隐式回退到付费模型。免费模型可能下线，并可能保留请求数据
+用于模型改进；不要提交机密内容。完整说明见
+[CONFIGURATION.md](./CONFIGURATION.md#opencode-zen-免费模型)。
 
 真实 embedding 可按需开启：
 
@@ -87,6 +97,16 @@ max_tokens = 512
 其他 provider 示例：
 
 ```toml
+# OpenCode Zen 其他限时免费模型
+provider = "opencode"
+model = "north-mini-code-free"
+api_base = "https://opencode.ai/zen/v1"
+
+# OpenRouter 固定免费模型（model id 以官方当前列表为准）
+provider = "openrouter"
+model = "<model-id>:free"
+api_base = "https://openrouter.ai/api/v1"
+
 # Deepseek
 provider = "deepseek"
 model = "deepseek-chat"
@@ -112,6 +132,11 @@ api_base = "http://localhost:11434/v1"
 ```bash
 poetry run omniagent --workspace ./workspace llm check
 ```
+
+如果检查返回 `diagnosis: llm_authentication_failed`，优先确认当前 shell 中的
+provider 专用 API Key（OpenCode Zen 为 `OPENCODE_API_KEY`）、
+`OMNIAGENT_LLM_API_BASE` / `api_base` 和 `model` 是否匹配；不要把真实 key
+写入配置文件或提交。
 
 执行一个任务：
 
@@ -253,7 +278,7 @@ zsh -ic 'poetry run python scripts/run_real_world_evals.py --include-complex --v
 # 汇总已有 eval_runs 的跨 run evidence 索引（不重新执行评测）
 zsh -ic 'poetry run python scripts/run_real_world_evals.py --build-evidence-index'
 
-# 查询已有 evidence 索引，可按 failure layer / skill / procedure / habit / lineage / scenario / promotion generation type / promotion source target / category / requires / skip reason / permission / completion layer / policy decision / skipped stage / policy risk flag / policy reason / policy context budget / request payload stats / node status / critic action / memory retrieval / LLM usage / learning kind / learning validation / skill validation / review decision / audit event 过滤
+# 查询已有 evidence 索引，可按 failure layer / skill / procedure / habit / lineage / scenario / promotion generation type / promotion source target / category / requires / skip reason / permission / completion layer / policy decision / skipped stage / policy risk flag / policy reason / policy context budget / request payload stats / node status / critic action / memory retrieval / LLM usage / LLM health / learning kind / learning validation / skill validation / review decision / audit event 过滤
 zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-failure-layer skill_or_tool'
 zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-skill "generated.habit.*" --evidence-output eval_runs/evidence_query.md'
 zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-scenario "learning_loop_jsonl_habit_promoted_skill_lineage"'
@@ -278,6 +303,7 @@ zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-inde
 zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-memory-retrieval recorded'
 zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-llm-usage llm_called'
 zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-llm-usage "tokens:10000+,duration:60s+"'
+zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-llm-health health_check:failed'
 zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-learning-kind habit_fast_paths'
 zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-learning-validation "*"'
 zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-index --evidence-skill-validation passed'
@@ -287,7 +313,7 @@ zsh -ic 'poetry run python scripts/run_real_world_evals.py --query-evidence-inde
 # 审计通用 Agent 初步可用目标：场景定义覆盖、required passed evidence、真实 LLM preflight / baseline
 zsh -ic 'poetry run python scripts/run_real_world_evals.py --audit-general-agent-usability --audit-allow-incomplete'
 
-# 生成失败修复入口、regression commands（含 eval coverage status / scenario / category / requires / skip reason、used skill、procedure id / habit id、lineage skill、promotion generation type / promotion source target / permission summary / completion layer / policy decision / skipped stage / policy risk flag / policy reason / policy context budget 高水位 / request payload stats 高水位 / node status / critic action / memory retrieval / LLM usage / learning kind / learning validation / skill validation / review decision / audit event 动态查询）、eval coverage、skipped eval、model capability、node execution、critic action、completion evaluation、memory retrieval、LLM usage / runtime cost hotspot、execution policy、Planner skipped、policy risk flag、policy reason、policy context budget、request payload stats、learning match explanation、learning gate、learning governance、learning history、learning approval、learning promotion、learning validation、learning edit、learning request-changes、learning decay、learning disable、learning restore、learning rollback、learning rejection、learning audit gap、skill lifecycle governance、skill promotion coverage、skill approval gate 和 lineage 回归看板（不重新执行评测）
+# 生成失败修复入口、regression commands（含 eval coverage status / scenario / category / requires / skip reason、used skill、procedure id / habit id、lineage skill、promotion generation type / promotion source target / permission summary / completion layer / policy decision / skipped stage / policy risk flag / policy reason / policy context budget 高水位 / request payload stats 高水位 / node status / critic action / memory retrieval / LLM usage / LLM health / learning kind / learning validation / skill validation / review decision / audit event 动态查询）、eval coverage、skipped eval、model capability、node execution、critic action、completion evaluation、memory retrieval、LLM usage / LLM health / runtime cost hotspot、execution policy、Planner skipped、policy risk flag、policy reason、policy context budget、request payload stats、learning match explanation、learning gate、learning governance、learning history、learning approval、learning promotion、learning validation、learning edit、learning request-changes、learning decay、learning disable、learning restore、learning rollback、learning rejection、learning audit gap、skill lifecycle governance、skill promotion coverage、skill approval gate 和 lineage 回归看板（不重新执行评测）
 zsh -ic 'poetry run python scripts/run_real_world_evals.py --evidence-dashboard'
 zsh -ic 'poetry run python scripts/run_real_world_evals.py --evidence-dashboard --evidence-dashboard-commands-output eval_runs/evidence_dashboard.commands'
 
@@ -329,25 +355,34 @@ workspace/
 
 - [docs/README.md](./docs/README.md) — 文档治理入口、阅读顺序和整理规则
 - [docs/doc-registry.md](./docs/doc-registry.md) — 文档类型、状态、权威边界和替代关系登记表
+- [docs/specs/README.md](./docs/specs/README.md) — 当前规格总入口
+- [docs/specs/current-system.md](./docs/specs/current-system.md) — 当前系统边界、运行链路、证据和安全不变量
+- [docs/specs/task-intake.md](./docs/specs/task-intake.md) — 任务类型、风险、工具、验证和确认预判
 - [docs/product-architecture.md](./docs/product-architecture.md) — 目标产品架构、学习闭环和 Agent 重新设计方向
-- [AGENT_USABILITY_LEARNING_LOOP_MVP.md](./docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md) — 当前主线：`META-010` Agent usability and learning loop MVP
 - [docs/specs/agent-state.md](./docs/specs/agent-state.md) — Agent state 最小数据契约和验收标准
 - [docs/specs/experience-record.md](./docs/specs/experience-record.md) — 任务经验记录 schema、写入时机和 learning gate
 - [docs/specs/procedure-memory.md](./docs/specs/procedure-memory.md) — procedure / habit 生命周期和升级规则
 - [docs/specs/skill-promotion.md](./docs/specs/skill-promotion.md) — habit -> skill promotion gate、lineage、contract 和权限规则
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — 旧实现架构和迁移输入
+- [docs/specs/learning-feedback.md](./docs/specs/learning-feedback.md) — 任务结束学习反馈
+- [docs/specs/learning-correction.md](./docs/specs/learning-correction.md) — 学习失败后的降级、冻结和恢复
+- [META-010 完成记录](./docs/workstreams/completed/AGENT_USABILITY_LEARNING_LOOP_MVP.md) — Phase 0–7 实施与验收历史
 - [CONFIGURATION.md](./CONFIGURATION.md) — 完整配置参考
 - [ROADMAP.md](./ROADMAP.md) — 路线图与优先级
-- [pre-product-redesign archive](./docs/archive/pre-product-redesign/) — 重开发前旧阶段过程文档归档
-- [REAL_WORLD_EVAL_PLAN.md](./REAL_WORLD_EVAL_PLAN.md) — 真实场景自主评测闭环
+- [真实场景评测 Runbook](./docs/runbooks/real-world-evaluation.md) — 场景选择、执行、归因和证据消费
+- [docs/archive/](./docs/archive/README.md) — 旧架构、旧专项和项目历史
 - [CLAUDE.md](./CLAUDE.md) — 给 AI 编程助手的项目指南
 - [AGENTS.md](./AGENTS.md) — 项目规则
-- [issue.md](./issue.md) — 问题追踪与近期已关闭记录
+- [issue.md](./issue.md) — 当前未关闭问题
 
 ## 当前状态
 
-代码层面仍保留三阶段 MVP、P0 补丁轮、`BASECAP-001`、`BASECAP-002`、`REAL-EVAL-005`、`CAP-EVAL-001` 和 `META-009` 首轮落地结果作为旧实现基础；相关过程文档已归档到 [`docs/archive/pre-product-redesign/`](./docs/archive/pre-product-redesign/)。
+META-010 Phase 0–7 已完成，当前系统已具备 Agent state、Task Intake、
+ExperienceRecord、procedure / habit 复用、skill promotion、learning feedback、
+learning correction 和统一学习治理。当前没有 active workstream；行为契约已沉淀到
+[`docs/specs/`](./docs/specs/README.md)。
 
-当前开发主线是 [`META-010` Agent usability and learning loop MVP](./docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md)。Phase 1 Agent state、Phase 2 Experience records、Phase 3 Procedure memory、Phase 4 Habit fast path、Phase 5 Skill promotion、Phase 6 Learning feedback 和 Phase 7 Learning correction 已实现，学习反馈、学习纠错、治理入口、evidence index 和 evidence dashboard 已形成第一轮学习闭环。当前新增了 `TaskIntakeAssessment`，任务执行前会记录任务类型、风险等级、候选工具、验证方式和是否需要确认，写入 `workspace/tasks/<task_id>/plan/intake_assessment.json`，并通过 CLI 非 JSON 事件流提前输出 `任务预判`。
-
-下一步是推进通用 Agent 初步可用版：用多类真实个人任务验证目标理解、风险判断、工具选择、执行验证、记忆复用和学习纠错，而不是把开发维护任务或 skill 类型扩展当成产品边界。首批 `general_agent_usability_*` 场景覆盖文件整理、信息归纳、文档生成、数据处理和网页信息获取 5 类任务，并为每类补了学习序列、自然语言 tool-choice 和独立权限边界场景，已通过 `scripts/run_real_world_evals.py --check-only`；离线 `OMNIAGENT_LLM_PROVIDER=test` 执行基线 `eval_runs/general_agent_usability_offline_latest/20260623_022106/` 为 15 passed / 0 failed / 0 skipped，真实 provider dry-run preflight `eval_runs/general_agent_usability_real/20260623_023645/` 已选中 5 个 tool-choice 场景且未调用 LLM，`--audit-general-agent-usability --audit-allow-incomplete` 当前确认 required scenarios 均有 passed evidence 且 preflight ready，真实 LLM provider tool-choice 执行基线仍待建立。
+下一阶段是通用 Agent 产品验证。现有 58 个真实场景定义通过检查；离线
+`general_agent_usability` 基线为 15 passed / 0 failed / 0 skipped。真实 provider
+tool-choice 基线仍未完成。仓库现已默认接入 OpenCode Zen 的
+`deepseek-v4-flash-free` 并通过离线契约测试，但尚未使用有效 OpenCode Key
+执行真实 health check 和五场景基线；这不能解释为真实模型能力已经验证。

@@ -63,6 +63,158 @@ class OpenAICompatibleAdapterTest(unittest.TestCase):
             adapter.endpoint, "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
         )
 
+    def test_openrouter_defaults_to_free_router_and_official_endpoint(self) -> None:
+        adapter = OpenAICompatibleAdapter(
+            self._config(
+                provider="openrouter",
+                model="",
+                api_base=None,
+                openrouter_app_title="OmniAgent",
+            )
+        )
+
+        self.assertEqual(adapter.model, "openrouter/free")
+        self.assertEqual(
+            adapter.endpoint,
+            "https://openrouter.ai/api/v1/chat/completions",
+        )
+        self.assertEqual(adapter._headers()["X-OpenRouter-Title"], "OmniAgent")
+
+    def test_openrouter_attribution_headers_are_configurable(self) -> None:
+        adapter = OpenAICompatibleAdapter(
+            self._config(
+                provider="openrouter",
+                model="openrouter/free",
+                api_base="https://openrouter.ai/api/v1",
+                openrouter_site_url="https://example.test/omniagent",
+                openrouter_app_title="OmniAgent Test",
+            )
+        )
+
+        headers = adapter._headers()
+        self.assertEqual(headers["HTTP-Referer"], "https://example.test/omniagent")
+        self.assertEqual(headers["X-OpenRouter-Title"], "OmniAgent Test")
+
+    def test_openrouter_free_only_rejects_paid_model(self) -> None:
+        with self.assertRaises(OmniAgentError) as context:
+            OpenAICompatibleAdapter(
+                self._config(
+                    provider="openrouter",
+                    model="anthropic/claude-sonnet-4",
+                    api_base="https://openrouter.ai/api/v1",
+                )
+            )
+
+        self.assertIn("free-only", str(context.exception))
+
+    def test_openrouter_free_only_accepts_specific_free_variant(self) -> None:
+        adapter = OpenAICompatibleAdapter(
+            self._config(
+                provider="openrouter",
+                model="meta-llama/llama-3.2-3b-instruct:free",
+                api_base="https://openrouter.ai/api/v1",
+            )
+        )
+
+        self.assertEqual(adapter.model, "meta-llama/llama-3.2-3b-instruct:free")
+
+    def test_opencode_defaults_to_free_model_and_official_endpoint(self) -> None:
+        adapter = OpenAICompatibleAdapter(
+            self._config(
+                provider="opencode",
+                model="",
+                api_base=None,
+            )
+        )
+
+        self.assertEqual(adapter.model, "deepseek-v4-flash-free")
+        self.assertEqual(
+            adapter.endpoint,
+            "https://opencode.ai/zen/v1/chat/completions",
+        )
+
+    def test_opencode_free_only_rejects_paid_model(self) -> None:
+        with self.assertRaises(OmniAgentError) as context:
+            OpenAICompatibleAdapter(
+                self._config(
+                    provider="opencode",
+                    model="deepseek-v4-flash",
+                    api_base="https://opencode.ai/zen/v1",
+                )
+            )
+
+        self.assertIn("free-only", str(context.exception))
+
+    def test_opencode_free_only_accepts_free_model(self) -> None:
+        adapter = OpenAICompatibleAdapter(
+            self._config(
+                provider="opencode",
+                model="north-mini-code-free",
+                api_base="https://opencode.ai/zen/v1",
+            )
+        )
+
+        self.assertEqual(adapter.model, "north-mini-code-free")
+
+    def test_opencode_anonymous_mode_accepts_free_model_without_key(self) -> None:
+        adapter = OpenAICompatibleAdapter(
+            self._config(
+                provider="opencode",
+                model="north-mini-code-free",
+                api_key=None,
+                api_base="https://opencode.ai/zen/v1",
+                opencode_free_only=True,
+                opencode_allow_anonymous=True,
+            )
+        )
+
+        self.assertNotIn("Authorization", adapter._headers())
+        self.assertEqual(adapter._headers()["User-Agent"], "OmniAgent/0.1.0")
+
+    def test_opencode_free_model_without_key_requires_anonymous_opt_in(self) -> None:
+        with self.assertRaises(OmniAgentError) as context:
+            OpenAICompatibleAdapter(
+                self._config(
+                    provider="opencode",
+                    model="north-mini-code-free",
+                    api_key=None,
+                    api_base="https://opencode.ai/zen/v1",
+                    opencode_free_only=True,
+                    opencode_allow_anonymous=False,
+                )
+            )
+
+        self.assertIn("API Key", str(context.exception))
+
+    def test_opencode_anonymous_mode_does_not_allow_paid_model(self) -> None:
+        with self.assertRaises(OmniAgentError) as context:
+            OpenAICompatibleAdapter(
+                self._config(
+                    provider="opencode",
+                    model="deepseek-v4-flash",
+                    api_key=None,
+                    api_base="https://opencode.ai/zen/v1",
+                    opencode_free_only=True,
+                    opencode_allow_anonymous=True,
+                )
+            )
+
+        self.assertIn("free-only", str(context.exception))
+
+    def test_opencode_anonymous_mode_does_not_apply_to_other_providers(self) -> None:
+        with self.assertRaises(OmniAgentError) as context:
+            OpenAICompatibleAdapter(
+                self._config(
+                    provider="openrouter",
+                    model="openrouter/free",
+                    api_key=None,
+                    api_base="https://openrouter.ai/api/v1",
+                    opencode_allow_anonymous=True,
+                )
+            )
+
+        self.assertIn("API Key", str(context.exception))
+
     def test_local_endpoint_no_api_key_required(self) -> None:
         adapter = OpenAICompatibleAdapter(
             self._config(api_key=None, api_base="http://localhost:11434/v1")
@@ -199,6 +351,39 @@ class OpenAICompatibleAdapterTest(unittest.TestCase):
         health = adapter.check_health()
         self.assertTrue(health["healthy"])
         self.assertEqual(health["provider"], "openai")
+        self.assertEqual(health["model"], "test-model")
+        self.assertEqual(health["requested_model"], "gpt-4o-mini")
+
+    @patch("urllib.request.urlopen")
+    def test_openrouter_response_records_selected_free_model(self, mock_urlopen: MagicMock) -> None:
+        mock_urlopen.return_value = _fake_response(
+            _chat_response(
+                '{"ok": true}',
+                model="upstage/solar-pro-3:free",
+            ),
+        )
+        adapter = OpenAICompatibleAdapter(
+            self._config(
+                provider="openrouter",
+                model="openrouter/free",
+                api_base="https://openrouter.ai/api/v1",
+            )
+        )
+
+        response = adapter.generate_structured(
+            prompt_name="health_check",
+            system_prompt="test",
+            request_payload={"ping": "test"},
+            schema={
+                "type": "object",
+                "properties": {"ok": {"type": "boolean"}},
+                "required": ["ok"],
+            },
+        )
+
+        self.assertEqual(response.model, "upstage/solar-pro-3:free")
+        call_body = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
+        self.assertEqual(call_body["model"], "openrouter/free")
 
     @patch("urllib.request.urlopen")
     def test_all_retries_exhausted_raises(self, mock_urlopen: MagicMock) -> None:

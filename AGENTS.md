@@ -8,7 +8,7 @@
 
 ## 项目定位
 
-OmniAgent 当前代码基础是一个以 task 为中心的本地嵌入式 Agent Runtime；当前产品目标是按 `docs/product-architecture.md` 重开发为以学习循环为中心的个人 Agent OS：
+OmniAgent 是以学习循环为中心、task runtime 作为执行层的本地个人 Agent OS：
 
 - 单用户、单机、CLI 优先
 - 面向开发者和技术用户，可调试、可审计、可演化
@@ -17,7 +17,10 @@ OmniAgent 当前代码基础是一个以 task 为中心的本地嵌入式 Agent 
 - 轻量本地运行时：stdlib 核心 + 默认本地 embedding 推理依赖 + OpenAI 兼容 LLM
 - 默认离线运行，除 LLM 调用和显式授权网络任务外不访问外部网络
 
-当前代码层面已完成三阶段 MVP、P0 补丁轮、`BASECAP-001`、`BASECAP-002`、`REAL-EVAL-005`、`CAP-EVAL-001` 和 `META-009` 首轮落地结果；这些作为旧实现基础和迁移输入。现阶段主线切换为 `META-010` Agent usability and learning loop MVP：Phase 1 Agent state、Phase 2 Experience records、Phase 3 Procedure memory、Phase 4 Habit fast path、Phase 5 Skill promotion、Phase 6 Learning feedback 和 Phase 7 Learning correction 已实现并接入真实评测证据；下一步进入更深的 learning-loop 治理增强和更广的稳定 habit / skill promotion 回归。
+META-010 Phase 0–7 已完成，Agent state、Task Intake、ExperienceRecord、procedure
+memory、habit fast path、skill promotion、learning feedback 和 learning correction
+均已进入当前规格。当前没有 active workstream；下一阶段按 `ROADMAP.md` 验证真实
+LLM 下的通用任务质量，并以真实稳定 habit 驱动后续能力扩展。
 
 ## 权威文档
 
@@ -26,22 +29,26 @@ OmniAgent 当前代码基础是一个以 task 为中心的本地嵌入式 Agent 
 1. `README.md`：入口文档、能力概览和快速开始
 2. `docs/doc-registry.md`：文档类型、生命周期状态、权威边界和替代关系
 3. `docs/product-architecture.md`：目标产品架构、学习闭环和后续产品路线取舍
-4. `docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md`：当前 `META-010` 重开发专项和验收矩阵
-5. `docs/specs/agent-state.md`：Agent state 最小数据契约和验收标准
-6. `docs/specs/experience-record.md`：任务经验记录 schema、写入时机和 learning gate
-7. `docs/specs/procedure-memory.md`：procedure / habit 生命周期和升级规则
-8. `docs/specs/skill-promotion.md`：habit -> skill promotion gate、lineage、contract 和权限规则
-9. `docs/specs/learning-feedback.md`：任务结束学习反馈输出契约
-10. `docs/specs/learning-correction.md`：复用失败、降级冻结、解释、复审和恢复证据契约
-11. `ARCHITECTURE.md`：旧实现架构、模块职责、执行流程和迁移输入
-12. `ROADMAP.md`：路线图和当前优先级
-13. `issue.md`：未关闭问题与近期已关闭记录
-14. `REAL_WORLD_EVAL_PLAN.md`：真实场景自主评测闭环
-15. `CONFIGURATION.md`：配置项和环境变量参考
-16. `docs/archive/pre-product-redesign/`：重开发前旧阶段过程文档归档
-17. `CLAUDE.md`：其他 AI 编程助手的项目指南
+4. `docs/specs/README.md`：当前规格入口和权威边界
+5. `docs/specs/current-system.md`：当前系统边界、运行链路、证据和安全不变量
+6. `docs/specs/task-intake.md`：任务类型、风险、工具、验证和确认预判
+7. `docs/specs/agent-state.md`：Agent state 最小数据契约和验收标准
+8. `docs/specs/experience-record.md`：任务经验记录 schema、写入时机和 learning gate
+9. `docs/specs/procedure-memory.md`：procedure / habit 生命周期和升级规则
+10. `docs/specs/skill-promotion.md`：habit -> skill promotion gate、lineage、contract 和权限规则
+11. `docs/specs/learning-feedback.md`：任务结束学习反馈输出契约
+12. `docs/specs/learning-correction.md`：复用失败、降级冻结、解释、复审和恢复证据契约
+13. `ROADMAP.md`：路线图和当前优先级
+14. `issue.md`：当前未关闭问题
+15. `docs/runbooks/real-world-evaluation.md`：真实场景评测执行与归因流程
+16. `CONFIGURATION.md`：配置项和环境变量参考
+17. `docs/workstreams/completed/AGENT_USABILITY_LEARNING_LOOP_MVP.md`：META-010 完成与验收记录
+18. `docs/archive/`：旧架构、旧专项和项目历史，仅作历史参考
+19. `CLAUDE.md`：其他 AI 编程助手的兼容入口
 
-代码是当前实现事实来源；目标产品方向以 `docs/product-architecture.md` 和 `META-010` workstream 为准。文档与代码冲突时，应区分“旧实现事实”和“新目标契约”，不要把旧实现误当成新架构要求。
+代码是当前实现事实来源；当前行为以 `docs/specs/` 为规格，目标产品方向以
+`docs/product-architecture.md` 和 `ROADMAP.md` 为准。归档与 completed workstream
+不再约束当前实现。
 
 ## 目录与模块
 
@@ -174,7 +181,9 @@ poetry run python scripts/run_real_world_evals.py --include-complex
 
 - 项目根目录读取 `omniagent.toml` 或 `.omniagent.toml`
 - 敏感信息必须通过环境变量注入
-- API Key 使用 `OMNIAGENT_LLM_API_KEY`，并兼容 `OPENAI_API_KEY` / `ARK_API_KEY`
+- API Key 通用入口是 `OMNIAGENT_LLM_API_KEY`；OpenCode Zen、OpenRouter、
+  OpenAI 和 Ark 分别兼容 `OPENCODE_API_KEY`、`OPENROUTER_API_KEY`、
+  `OPENAI_API_KEY` 和 `ARK_API_KEY`
 - 不在 `omniagent.toml`、文档、测试快照、日志或提交信息中写入真实 key
 - 真实 LLM 调用默认会产生 token 消耗；评测和手工运行前应确认 provider、model、api_base 指向预期环境
 
@@ -184,6 +193,12 @@ poetry run python scripts/run_real_world_evals.py --include-complex
 - `OMNIAGENT_LLM_MODEL`
 - `OMNIAGENT_LLM_API_BASE`
 - `OMNIAGENT_LLM_API_KEY`
+- `OPENCODE_API_KEY`
+- `OMNIAGENT_OPENCODE_FREE_ONLY`
+- `OPENROUTER_API_KEY`
+- `OMNIAGENT_OPENROUTER_FREE_ONLY`
+- `OMNIAGENT_OPENROUTER_SITE_URL`
+- `OMNIAGENT_OPENROUTER_APP_TITLE`
 - `OMNIAGENT_EMBEDDING_ENABLED`
 - `OMNIAGENT_EMBEDDING_PROVIDER`
 - `OMNIAGENT_EMBEDDING_MODEL`

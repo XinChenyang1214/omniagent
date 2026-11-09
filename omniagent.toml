@@ -2,16 +2,18 @@
 # 环境变量优先级高于此文件（环境变量会覆盖文件中的值）
 
 [llm]
-provider = "openai"           # openai / deepseek / ark / ollama / 任意 OpenAI 兼容服务
-model = "qwen3.6-plus"         # 模型名称
-# api_key intentionally omitted; use OMNIAGENT_LLM_API_KEY
-api_base = "https://dashscope.aliyuncs.com/compatible-mode/v1"                 # API 地址，留空则使用 provider 默认地址
+provider = "opencode"         # 默认使用 OpenCode Zen 限时免费模型
+model = "deepseek-v4-flash-free"
+# api_key intentionally omitted; use OPENCODE_API_KEY
+api_base = "https://opencode.ai/zen/v1"
 temperature = 0.0             # 生成温度
-timeout_seconds = 120        # 单次请求超时（秒）— Dashscope/Qwen 较慢，给足 buffer
+timeout_seconds = 120         # 单次请求超时（秒）
 max_retries = 2               # 失败重试次数
 fallback_provider = ""        # 降级 provider（主 provider 失败时切换）
-enable_runtime_fallback = true
+enable_runtime_fallback = false
 verify_on_startup = false     # 启动时是否执行 LLM 健康检查
+opencode_free_only = true     # 阻止误用未带 -free 后缀的付费模型
+opencode_allow_anonymous = true # 临时允许无 Key 请求；上游仍可能拒绝
 
 [embedding]
 enabled = true

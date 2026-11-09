@@ -1,15 +1,15 @@
 # Skill Promotion Spec
 
-Last reviewed: 2026-06-13
+Last reviewed: 2026-07-31
 
 ## 文档状态
 
 - Document type: spec
 - Workstream: `META-010`
-- Document status: confirmed
+- Document status: active
 - Implementation status: implemented
 - Authority scope: stable habit -> skill promotion candidate -> validated / active skill 的门禁、lineage、contract、权限和验证规则
-- Parent workstream: [`AGENT_USABILITY_LEARNING_LOOP_MVP.md`](../workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md)
+- Completion evidence: [`AGENT_USABILITY_LEARNING_LOOP_MVP.md`](../workstreams/completed/AGENT_USABILITY_LEARNING_LOOP_MVP.md)
 
 ## 目标
 

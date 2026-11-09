@@ -1,17 +1,19 @@
 # OmniAgent 产品整体架构设计
 
-Last reviewed: 2026-06-22
+Last reviewed: 2026-07-31
 
 ## 文档状态
 
 - Document type: product architecture / design strategy
 - Workstream: smart learning agent redesign
 - Document status: active
-- Implementation status: not_started
+- Implementation status: partially_implemented
 - Authority scope: 目标产品架构、设计思想、后续路线取舍
-- Current implementation source: `ARCHITECTURE.md` and code under `src/omniagent/`
+- Current implementation source: `docs/specs/current-system.md` and code under `src/omniagent/`
 
-本文描述 OmniAgent 下一阶段应该成为怎样的产品。它不是当前代码已经实现的事实；当前事实仍以 `ARCHITECTURE.md`、`ROADMAP.md`、`issue.md` 和代码为准。
+本文描述 OmniAgent 的目标产品架构和长期取舍。META-010 已实现首轮学习闭环 MVP，
+但本文仍包含尚未实现的长期目标；当前行为以
+[`specs/current-system.md`](specs/current-system.md)、子规格、测试和代码为准。
 
 ## 产品定位
 
@@ -41,19 +43,22 @@ OmniAgent 不应该继续只被定义为 task-centric runtime。它的目标产�
 
 > OmniAgent 是一个以学习循环为中心的通用个人 Agent OS；Task runtime 是执行层，不是产品中心，代码能力只是其中一种能力。
 
-## 当前偏离点
+## 当前实现进度与剩余差距
 
-当前实现的优势是可审计、可调试、模块边界清晰，但它更像一个任务执行引擎，而不是一个“看起来聪明、会自我学习、能持续帮我做事”的 Agent。
+首轮 MVP 已具备 Agent state、Task Intake、ExperienceRecord、procedure / habit
+复用、skill promotion、learning feedback、learning correction 和统一治理入口。
+Execution Runtime 已成为学习闭环中的执行层。
 
-| 偏离点 | 当前表现 | 目标表现 |
+仍需通过产品验证或后续实现解决：
+
+| 方向 | 当前状态 | 后续目标 |
 |---|---|---|
-| 产品中心 | `TaskGraph`、Planner、ExecutionEngine 是主轴 | 用户目标、上下文连续性、学习结果是主轴 |
-| 记忆定义 | 多路 recall，把材料塞回上下文 | 行为会被记忆改变，记忆能升级为 procedure / habit / skill |
-| 学习方式 | workflow compiler 和 skill lifecycle 偏工程沉淀 | 从任务经验中提炼可验证的流程记忆，并在下次任务优先复用 |
-| 聪明感 | 每次重新规划、重新解释、重新验证 | 识别熟悉场景，使用已学流程，知道何时少想、何时深想 |
-| 交互关系 | 用户提交 task，runtime 返回结果 | 用户和 Agent 共处一个长期工作现场，Agent 维护目标、状态和偏好 |
-| 能力演进 | 增加 builtin skill 或 executor | 经验先变成 procedure，再通过验证升级成 habit / skill |
-| 安全治理 | 权限和沙箱主要保护执行动作 | 用户可审计学习内容、能力升级和自主行为边界 |
+| 通用任务质量 | 五类任务离线基线通过 | 建立真实 LLM tool-choice 基线并修复真实失败 |
+| 长期上下文 | typed state + file/graph/vector recall | 用真实使用验证跨任务连续性和召回精度 |
+| 学习复用 | procedure、habit fast path、skill lineage 已实现 | 积累真实稳定 habit，验证跨场景迁移 |
+| 纠错治理 | 冻结、复审、恢复和 CLI 治理已实现 | 降低误召回、过期规则和人工治理成本 |
+| 多入口体验 | CLI / chat | 在核心闭环稳定前不扩展 Web、Desktop 或 messaging |
+| 运行可靠性 | 离线测试和 evidence 体系完整 | 补齐真实 provider、长上下文和模型能力边界证据 |
 
 ## 参考产品设计思想
 

@@ -1,15 +1,15 @@
 # Learning Correction Spec
 
-Last reviewed: 2026-06-16
+Last reviewed: 2026-07-31
 
 ## 文档状态
 
 - Document type: spec
 - Workstream: `META-010` / Learning correction
-- Document status: confirmed
+- Document status: active
 - Implementation status: verified
 - Authority scope: procedure / habit 复用失败、过期或用户修正后的纠错、降级、冻结、解释和恢复证据契约
-- Parent workstream: [`AGENT_USABILITY_LEARNING_LOOP_MVP.md`](../workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md)
+- Completion evidence: [`AGENT_USABILITY_LEARNING_LOOP_MVP.md`](../workstreams/completed/AGENT_USABILITY_LEARNING_LOOP_MVP.md)
 
 ## 目标
 

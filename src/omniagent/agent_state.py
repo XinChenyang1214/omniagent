@@ -202,23 +202,27 @@ def _default_project_state(project_root: Path) -> ProjectState:
         [
             "README.md",
             "docs/doc-registry.md",
+            "docs/specs/README.md",
+            "docs/specs/current-system.md",
+            "docs/specs/task-intake.md",
             "docs/product-architecture.md",
-            "docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md",
             "docs/specs/agent-state.md",
             "docs/specs/experience-record.md",
             "docs/specs/procedure-memory.md",
+            "docs/specs/skill-promotion.md",
+            "docs/specs/learning-feedback.md",
+            "docs/specs/learning-correction.md",
             "ROADMAP.md",
             "issue.md",
         ],
     )
     archived_docs = _existing_relative_paths(
         project_root,
-        ["docs/archive/pre-product-redesign"],
+        ["docs/archive"],
     )
     workstream = (
-        "META-010"
-        if "docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md"
-        in authoritative_docs
+        "none"
+        if "docs/specs/current-system.md" in authoritative_docs
         else "unknown"
     )
     return ProjectState(
@@ -235,23 +239,25 @@ def _default_current_goal(project_root: Path) -> CurrentGoal:
     if not has_agent_state_spec:
         return CurrentGoal()
     return CurrentGoal(
-        title="Implement Phase 1 Agent state from the active roadmap",
+        title="Validate general Agent usability with real task evidence",
         definition_of_done=[
-            "AgentProfile, UserPreference, ProjectState, and CurrentGoal persist locally.",
-            "CLI and REPL can show current Agent state.",
-            "Runtime injects a concise state summary into task context.",
-            "Tests prove initialization, preference disabling, current goal update, "
-            "sensitive value protection, and risk policy propagation.",
+            "Offline general-agent scenarios remain green.",
+            "A healthy real LLM provider completes the five tool-choice scenarios.",
+            "Failures are attributed to the correct runtime layer and repaired with regressions.",
         ],
         status="active",
-        active_phase="Phase 1: Agent state",
+        active_phase="General Agent product validation",
         next_actions=[
-            "Implement workspace-local state store.",
-            "Expose state show command.",
-            "Inject state summary into runtime context.",
-            "Add focused tests.",
+            "Run the offline scenario and test baselines.",
+            "Confirm provider configuration before any real LLM run.",
+            "Run the real tool-choice baseline after explicit authorization.",
         ],
-        evidence_refs=["ROADMAP.md", "docs/specs/agent-state.md"],
+        evidence_refs=[
+            "ROADMAP.md",
+            "issue.md",
+            "docs/specs/current-system.md",
+            "docs/runbooks/real-world-evaluation.md",
+        ],
     )
 
 

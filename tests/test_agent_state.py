@@ -39,6 +39,41 @@ class AgentStateStoreTest(unittest.TestCase):
         ):
             self.assertTrue((self.workspace / "agent_state" / filename).exists())
 
+    def test_current_document_layout_initializes_without_active_workstream(self) -> None:
+        current_docs = (
+            "README.md",
+            "ROADMAP.md",
+            "issue.md",
+            "docs/doc-registry.md",
+            "docs/product-architecture.md",
+            "docs/specs/README.md",
+            "docs/specs/current-system.md",
+            "docs/specs/task-intake.md",
+            "docs/specs/agent-state.md",
+        )
+        for relative_path in current_docs:
+            path = self.project_root / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("# fixture\n", encoding="utf-8")
+        (self.project_root / "docs" / "archive").mkdir(parents=True)
+
+        snapshot = self.store.ensure_defaults()
+
+        self.assertEqual(snapshot.project["current_workstream"], "none")
+        self.assertIn(
+            "docs/specs/current-system.md",
+            snapshot.project["authoritative_docs"],
+        )
+        self.assertNotIn(
+            "docs/workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md",
+            snapshot.project["authoritative_docs"],
+        )
+        self.assertEqual(snapshot.project["archived_docs"], ["docs/archive"])
+        self.assertEqual(
+            snapshot.goal["active_phase"],
+            "General Agent product validation",
+        )
+
     def test_summary_excludes_disabled_preferences(self) -> None:
         self.store.write_section(
             "preferences",

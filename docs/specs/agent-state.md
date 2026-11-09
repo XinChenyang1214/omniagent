@@ -1,15 +1,15 @@
 # Agent State Spec
 
-Last reviewed: 2026-06-12
+Last reviewed: 2026-07-31
 
 ## 文档状态
 
 - Document type: spec
 - Workstream: `META-010`
-- Document status: confirmed
+- Document status: active
 - Implementation status: implemented
 - Authority scope: Agent state 的最小数据契约、存储边界和验收标准
-- Parent workstream: [`AGENT_USABILITY_LEARNING_LOOP_MVP.md`](../workstreams/active/AGENT_USABILITY_LEARNING_LOOP_MVP.md)
+- Completion evidence: [`AGENT_USABILITY_LEARNING_LOOP_MVP.md`](../workstreams/completed/AGENT_USABILITY_LEARNING_LOOP_MVP.md)
 
 ## 目标
 
@@ -70,7 +70,7 @@ Required fields:
 |---|---|---|
 | `schema_version` | string | state schema version |
 | `project_root` | string | 项目根目录 |
-| `current_workstream` | string | 当前主线，例如 `META-010` |
+| `current_workstream` | string | 当前 workstream 标识；没有 active workstream 时为 `none` 或 `unknown` |
 | `authoritative_docs` | list[string] | 当前 active / confirmed 文档路径 |
 | `archived_docs` | list[string] | 归档历史文档入口 |
 | `open_questions` | list[string] | 当前开放问题 |

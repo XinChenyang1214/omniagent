@@ -41,6 +41,41 @@ def _to_builtin(value: Any) -> Any:
     return value
 
 
+def _annotate_llm_check_failure(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("healthy"):
+        return payload
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return payload
+    message = str(error.get("message") or "").lower()
+    provider = str(payload.get("provider") or "").strip() or "current provider"
+    model = str(payload.get("model") or "").strip()
+    auth_markers = (
+        "401",
+        "unauthorized",
+        "invalid api key",
+        "incorrect api key",
+        "authentication",
+        "auth",
+    )
+    if any(marker in message for marker in auth_markers):
+        payload["diagnosis"] = "llm_authentication_failed"
+        if provider.lower() == "openrouter":
+            key_name = "OPENROUTER_API_KEY (or OMNIAGENT_LLM_API_KEY)"
+        elif provider.lower() == "opencode":
+            key_name = "OPENCODE_API_KEY (or OMNIAGENT_LLM_API_KEY)"
+        else:
+            key_name = "OMNIAGENT_LLM_API_KEY"
+        next_actions = [
+            f"Check {key_name} for {provider}; do not write the key into files.",
+            "Confirm OMNIAGENT_LLM_API_BASE or api_base points to the selected provider.",
+        ]
+        if model:
+            next_actions.append(f"Confirm model {model} is available for this API key.")
+        payload["next_actions"] = next_actions
+    return payload
+
+
 def _format_event_line(event: TaskEvent) -> str:
     payload = event.payload or {}
     if event.event_type == "task.intake_assessed":
@@ -1508,7 +1543,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "llm" and args.llm_command == "check":
-        payload = gateway.check_llm()
+        try:
+            payload = gateway.check_llm()
+        except OmniAgentError as exc:
+            error_payload = exc.to_dict()
+            payload = {
+                "healthy": False,
+                "degraded_to_fallback": False,
+                "error": error_payload,
+            }
+            details = error_payload.get("details") or {}
+            for key in ("provider", "model", "endpoint"):
+                if details.get(key):
+                    payload[key] = details[key]
+        payload = _annotate_llm_check_failure(payload)
         if args.json:
             print(json.dumps(_to_builtin(payload), ensure_ascii=False, indent=2))
         else:
@@ -1523,6 +1571,14 @@ def main(argv: list[str] | None = None) -> int:
             fallback = payload.get("fallback")
             if fallback:
                 print(f"fallback_provider: {fallback.get('provider')}")
+            error = payload.get("error")
+            if error:
+                print(f"error_code: {error.get('code')}")
+                print(f"error_message: {error.get('message')}")
+            if payload.get("diagnosis"):
+                print(f"diagnosis: {payload.get('diagnosis')}")
+            for action in payload.get("next_actions") or []:
+                print(f"next_action: {action}")
         return 0 if payload.get("healthy") else 1
 
     if args.command == "llm" and args.llm_command == "stats":
